@@ -1,0 +1,37 @@
+{% load catalog_extras %}
+{% if page_obj.paginator.num_pages > 1 %}
+  <nav aria-label="Pagination" class="mt-10 flex items-center justify-between border-t border-edge-soft pt-6">
+    <div class="font-mono text-[11px] uppercase tracking-widest text-slate-500">
+      page <span class="text-slate-300">{{ page_obj.number }}</span>
+      <span class="text-slate-600">/</span>
+      <span class="text-slate-300">{{ page_obj.paginator.num_pages }}</span>
+      <span class="hidden sm:inline text-slate-600">·</span>
+      <span class="hidden sm:inline">{{ page_obj.paginator.count }} {{ page_obj.paginator.count|pluralize:"listing,listings" }}</span>
+    </div>
+    <ul class="flex items-center gap-1">
+      {% if page_obj.has_previous %}
+        <li>
+          <a href="?{% query_replace page=page_obj.previous_page_number %}"
+             class="inline-flex items-center gap-1 rounded-md border border-edge-strong bg-surface/60 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-400/40 hover:text-cyan-300 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m15 18-6-6 6-6"/></svg>
+            Prev
+          </a>
+        </li>
+      {% else %}
+        <li><span class="inline-flex items-center gap-1 rounded-md border border-edge-soft bg-surface/30 px-3 py-1.5 text-sm text-slate-600 cursor-not-allowed">Prev</span></li>
+      {% endif %}
+
+      {% if page_obj.has_next %}
+        <li>
+          <a href="?{% query_replace page=page_obj.next_page_number %}"
+             class="inline-flex items-center gap-1 rounded-md border border-edge-strong bg-surface/60 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-400/40 hover:text-cyan-300 transition">
+            Next
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </li>
+      {% else %}
+        <li><span class="inline-flex items-center gap-1 rounded-md border border-edge-soft bg-surface/30 px-3 py-1.5 text-sm text-slate-600 cursor-not-allowed">Next</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+{% endif %}

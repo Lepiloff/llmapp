@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.meta_title|default:post.title }} · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ post.meta_description|default:post.excerpt }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ post.title }}{% endblock %}
+{% block og_description %}{{ post.excerpt }}{% endblock %}
+{% block og_image %}{% if post.cover_image %}{{ SITE_BASE_URL }}{{ post.cover_image.url }}{% else %}{{ block.super }}{% endif %}{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "{{ post.title|escapejs }}",
+  "description": "{{ post.excerpt|escapejs }}",
+  "datePublished": "{{ post.published_at|date:'c' }}",
+  "author": { "@type": "Person", "name": "{{ post.author.get_full_name|default:post.author.username|escapejs }}" },
+  "publisher": { "@type": "Organization", "name": "{{ SITE_NAME }}" }
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<article class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12">
+  <nav aria-label="Breadcrumb" class="mb-6">
+    <ol class="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-slate-500">
+      <li><a href="/" class="hover:text-cyan-300">root</a></li>
+      <li aria-hidden="true">/</li>
+      <li><a href="{% url 'editorial:post_list' %}" class="hover:text-cyan-300">blog</a></li>
+    </ol>
+  </nav>
+
+  <header>
+    <div class="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+      <span class="text-violet-300">{{ post.get_post_type_display }}</span>
+      <span>·</span>
+      <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"Y-m-d" }}</time>
+      <span>·</span>
+      <span>{{ post.reading_time_minutes }} min read</span>
+    </div>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100">{{ post.title }}</h1>
+    {% if post.subtitle %}<p class="mt-3 text-lg text-slate-400">{{ post.subtitle }}</p>{% endif %}
+
+    <div class="mt-6 flex items-center gap-2 text-sm text-slate-400">
+      <span class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-edge-strong font-mono text-xs text-cyan-300">{{ post.author.username|slice:":1"|upper }}</span>
+      <span>{{ post.author.get_full_name|default:post.author.username }}</span>
+    </div>
+  </header>
+
+  {% if post.cover_image %}
+    <figure class="mt-8">
+      <img src="{{ post.cover_image.url }}" alt="{{ post.cover_alt_text }}" class="rounded-xl border border-edge-strong w-full h-auto">
+    </figure>
+  {% endif %}
+
+  <div class="prose prose-grid prose-invert mt-10 max-w-none">
+    {{ post.content|safe|linebreaks }}
+  </div>
+
+  {% if post.tags.all %}
+    <div class="mt-10 pt-6 border-t border-edge-soft flex flex-wrap items-center gap-2">
+      <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">tags:</span>
+      {% for t in post.tags.all %}
+        <a href="{% url 'editorial:post_list' %}?tag={{ t.slug }}" class="font-mono text-[11px] uppercase tracking-wider px-2 py-1 rounded border border-edge-strong bg-elevated text-slate-300 hover:text-cyan-300 transition">#{{ t.name }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if post.related_apps.all %}
+    <section class="mt-12">
+      <h2 class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// mentioned tools</h2>
+      <div class="mt-4 grid sm:grid-cols-2 gap-4">
+        {% for app in post.related_apps.all %}
+          {% include "partials/app_card.html" with app=app %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</article>
+
+{% if related_posts %}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="related" title="Keep reading" %}
+  <ul class="grid sm:grid-cols-3 gap-5">
+    {% for p in related_posts %}
+      <li>
+        <a href="{{ p.get_absolute_url }}" class="card-grid block p-5">
+          <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">{{ p.get_post_type_display }} · {{ p.reading_time_minutes }} min</p>
+          <h3 class="mt-2 text-base font-semibold text-slate-100 hover:text-cyan-300 transition">{{ p.title }}</h3>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,129 @@
+{% comment %}
+Facets sidebar partial.
+
+Expects:
+  filter_options.platforms / .categories / .capabilities  (with .name/.label, .slug/.key, .app_count)
+  current_filters.platform / .category / .capabilities  (current selections)
+{% endcomment %}
+<aside class="space-y-6">
+  {# Sort #}
+  <details open class="group rounded-lg border border-edge-soft bg-surface/40">
+    <summary class="cursor-pointer list-none flex items-center justify-between px-4 py-3 select-none">
+      <span class="font-mono text-[11px] uppercase tracking-widest text-slate-400">sort by</span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 text-slate-500 group-open:rotate-180 transition"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <div class="px-4 pb-4 space-y-1.5">
+      {% for opt in sort_options %}
+        <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+          <input type="radio" name="sort" value="{{ opt.value }}"
+                 {% if current_filters.sort == opt.value or not current_filters.sort and opt.value == 'relevance' %}checked{% endif %}
+                 class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30 focus:ring-offset-0">
+          <span>{{ opt.label }}</span>
+        </label>
+      {% empty %}
+        {% for value, label in default_sorts %}
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+            <input type="radio" name="sort" value="{{ value }}"
+                   {% if current_filters.sort == value %}checked{% endif %}
+                   class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30">
+            <span>{{ label }}</span>
+          </label>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+
+  {# Platforms #}
+  {% if filter_options.platforms %}
+  <details open class="group rounded-lg border border-edge-soft bg-surface/40">
+    <summary class="cursor-pointer list-none flex items-center justify-between px-4 py-3 select-none">
+      <span class="font-mono text-[11px] uppercase tracking-widest text-slate-400">platform</span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 text-slate-500 group-open:rotate-180 transition"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <div class="px-4 pb-4 space-y-1.5">
+      <label class="flex items-center justify-between gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+        <span class="inline-flex items-center gap-2">
+          <input type="radio" name="platform" value=""
+                 {% if not current_filters.platform %}checked{% endif %}
+                 class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30">
+          All platforms
+        </span>
+      </label>
+      {% for p in filter_options.platforms %}
+        <label class="flex items-center justify-between gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+          <span class="inline-flex items-center gap-2">
+            <input type="radio" name="platform" value="{{ p.slug }}"
+                   {% if current_filters.platform == p.slug %}checked{% endif %}
+                   class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30">
+            {{ p.name }}
+          </span>
+          <span class="font-mono text-[10px] text-slate-500">{{ p.app_count }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# Categories #}
+  {% if filter_options.categories %}
+  <details open class="group rounded-lg border border-edge-soft bg-surface/40">
+    <summary class="cursor-pointer list-none flex items-center justify-between px-4 py-3 select-none">
+      <span class="font-mono text-[11px] uppercase tracking-widest text-slate-400">category</span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 text-slate-500 group-open:rotate-180 transition"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <div class="px-4 pb-4 space-y-1.5 max-h-72 overflow-auto">
+      <label class="flex items-center justify-between gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+        <span class="inline-flex items-center gap-2">
+          <input type="radio" name="category" value=""
+                 {% if not current_filters.category %}checked{% endif %}
+                 class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30">
+          All categories
+        </span>
+      </label>
+      {% for c in filter_options.categories %}
+        <label class="flex items-center justify-between gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+          <span class="inline-flex items-center gap-2">
+            <input type="radio" name="category" value="{{ c.slug }}"
+                   {% if current_filters.category == c.slug %}checked{% endif %}
+                   class="text-cyan-400 border-edge-strong bg-elevated focus:ring-cyan-400/30">
+            {{ c.name }}
+          </span>
+          <span class="font-mono text-[10px] text-slate-500">{{ c.app_count }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# Capabilities (multi-select) #}
+  {% if filter_options.capabilities %}
+  <details open class="group rounded-lg border border-edge-soft bg-surface/40">
+    <summary class="cursor-pointer list-none flex items-center justify-between px-4 py-3 select-none">
+      <span class="font-mono text-[11px] uppercase tracking-widest text-slate-400">capabilities</span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 text-slate-500 group-open:rotate-180 transition"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <div class="px-4 pb-4 space-y-1.5">
+      {% for cap in filter_options.capabilities %}
+        <label class="flex items-center justify-between gap-2 cursor-pointer text-sm text-slate-300 hover:text-cyan-300">
+          <span class="inline-flex items-center gap-2">
+            <input type="checkbox" name="capability" value="{{ cap.key }}"
+                   {% if cap.key in current_filters.capabilities %}checked{% endif %}
+                   class="rounded border-edge-strong bg-elevated text-cyan-400 focus:ring-cyan-400/30">
+            {{ cap.label }}
+          </span>
+          <span class="font-mono text-[10px] text-slate-500">{{ cap.app_count }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  <div class="flex items-center justify-between text-xs">
+    <a href="{% url 'apps_search' %}" class="text-slate-400 hover:text-cyan-300 transition">
+      <span class="font-mono uppercase tracking-widest">reset all</span>
+    </a>
+    <noscript>
+      <button type="submit" class="rounded-md bg-cyan-400/10 border border-cyan-400/30 text-cyan-300 px-3 py-1.5 text-xs font-mono uppercase tracking-widest">apply</button>
+    </noscript>
+  </div>
+</aside>

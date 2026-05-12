@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ comparison.title }} · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ comparison.meta_description|default:comparison.introduction|truncatechars:280 }}{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-14">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// comparison</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100">{{ comparison.title }}</h1>
+    <p class="mt-2 font-mono text-slate-500">
+      {{ comparison.primary_app.name }} <span class="text-cyan-400">vs</span> {{ comparison.secondary_app.name }}
+    </p>
+  </div>
+</section>
+
+<section class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-12">
+  <div class="prose prose-grid prose-invert max-w-none">
+    {{ comparison.introduction|linebreaks }}
+  </div>
+
+  <div class="mt-10 grid sm:grid-cols-2 gap-5">
+    {% include "partials/app_card.html" with app=comparison.primary_app %}
+    {% include "partials/app_card.html" with app=comparison.secondary_app %}
+  </div>
+
+  {% if comparison.criteria %}
+    <div class="mt-10 rounded-xl border border-edge-strong bg-surface/60 overflow-hidden">
+      <p class="px-5 py-3 font-mono text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge-soft">// criteria matrix</p>
+      <pre class="px-5 py-4 text-xs text-slate-300 font-mono overflow-auto">{{ comparison.criteria|pprint }}</pre>
+    </div>
+  {% endif %}
+
+  <div class="mt-10 prose prose-grid prose-invert max-w-none">
+    <h2 class="text-xl font-semibold text-slate-100">Conclusion</h2>
+    {{ comparison.conclusion|linebreaks }}
+  </div>
+</section>
+{% endblock %}

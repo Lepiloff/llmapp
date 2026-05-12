@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ collection.meta_title|default:collection.name }} · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ collection.meta_description|default:collection.description|truncatechars:280 }}{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-14">
+    <nav aria-label="Breadcrumb" class="mb-3">
+      <ol class="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-slate-500">
+        <li><a href="{% url 'editorial:collection_list' %}" class="hover:text-cyan-300">collections</a></li>
+      </ol>
+    </nav>
+    <p class="font-mono text-[11px] uppercase tracking-widest text-violet-300">// collection</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100">{{ collection.name }}</h1>
+    {% if collection.subtitle %}<p class="mt-3 text-lg text-slate-400">{{ collection.subtitle }}</p>{% endif %}
+
+    {% if collection.intro_text %}
+      <div class="mt-6 prose prose-grid prose-invert max-w-none">{{ collection.intro_text|linebreaks }}</div>
+    {% else %}
+      <p class="mt-6 text-slate-300">{{ collection.description }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-12">
+  <ol class="space-y-5">
+    {% for item in collection_apps %}
+      <li class="card-grid p-6" data-corners>
+        <div class="flex items-start gap-5">
+          <span class="font-mono text-[11px] uppercase tracking-widest text-cyan-300 mt-1">{{ forloop.counter|stringformat:"02d" }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start gap-4">
+              {% if item.app.logo %}
+                <img src="{{ item.app.logo.url }}" alt="" class="h-12 w-12 rounded-lg border border-edge-strong bg-elevated object-cover" loading="lazy">
+              {% endif %}
+              <div class="flex-1">
+                <h2 class="text-lg font-semibold text-slate-100"><a href="{{ item.app.get_absolute_url }}" class="hover:text-cyan-300 transition">{{ item.app.name }}</a></h2>
+                <p class="text-sm text-slate-400 mt-1">{{ item.app.short_description }}</p>
+              </div>
+            </div>
+            {% if item.description %}<p class="mt-3 text-slate-300 leading-relaxed">{{ item.description }}</p>{% endif %}
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+
+  {% if collection.conclusion_text %}
+    <div class="mt-10 prose prose-grid prose-invert max-w-none">{{ collection.conclusion_text|linebreaks }}</div>
+  {% endif %}
+</section>
+{% endblock %}

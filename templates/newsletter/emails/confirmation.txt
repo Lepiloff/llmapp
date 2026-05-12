@@ -1,0 +1,11 @@
+Hi,
+
+Thanks for subscribing to {{ site_name }} — the weekly digest of LLM apps, connectors and field reports.
+
+Please confirm your email by visiting:
+
+{{ confirmation_url }}
+
+If you didn't sign up, ignore this email and nothing will happen.
+
+— {{ site_name }}

@@ -1,0 +1,155 @@
+/* ============================================================
+ * LLM App Market — Neural Grid stylesheet
+ * Targeted overrides on top of Tailwind CDN.
+ * Keep this lean: design tokens belong in tailwind.config.
+ * ============================================================ */
+
+:root {
+  --void: #05060a;
+  --surface: #0b0d14;
+  --elevated: #11141d;
+  --grid-line: rgba(148, 163, 184, 0.05);
+  --accent-cyan: #22d3ee;
+  --accent-violet: #a78bfa;
+}
+
+html, body { background-color: var(--void); }
+
+/* Alpine cloak: hide elements until Alpine hydrates them. */
+[x-cloak] { display: none !important; }
+
+/* Custom scrollbar — discreet, on-brand. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148,163,184,0.25) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(34,211,238,0.35); background-clip: padding-box; }
+
+/* Gradient text helper (with WCAG-safe solid fallback). */
+.text-gradient {
+  color: #e2e8f0;
+  background: linear-gradient(135deg, #67e8f9 0%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+@supports not (background-clip: text) {
+  .text-gradient { color: #67e8f9; -webkit-text-fill-color: currentColor; }
+}
+
+/* Card primitive — neutral surface that lights up on hover. */
+.card-grid {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid rgba(148,163,184,0.10);
+  border-radius: 0.875rem;
+  transition: border-color .2s ease, box-shadow .25s ease, transform .25s ease;
+}
+.card-grid:hover {
+  border-color: rgba(34,211,238,0.35);
+  box-shadow: 0 0 30px -12px rgba(34,211,238,0.45);
+}
+.card-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(120% 80% at 50% 0%, rgba(34,211,238,0.10), transparent 60%);
+  transition: opacity .25s ease;
+}
+.card-grid:hover::before { opacity: 1; }
+
+/* Subtle corner ticks — gives cards a "schematic" feel. */
+.card-grid[data-corners]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, rgba(34,211,238,0.5) 0 12px, transparent 12px) top left / 12px 1px no-repeat,
+    linear-gradient(to bottom, rgba(34,211,238,0.5) 0 12px, transparent 12px) top left / 1px 12px no-repeat,
+    linear-gradient(to left, rgba(167,139,250,0.5) 0 12px, transparent 12px) top right / 12px 1px no-repeat,
+    linear-gradient(to bottom, rgba(167,139,250,0.5) 0 12px, transparent 12px) top right / 1px 12px no-repeat;
+}
+
+/* Section heading rule. */
+.rule-grad {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(34,211,238,0.3), transparent);
+}
+
+/* htmx loading indicator — pulse a thin progress bar at top. */
+.htmx-indicator { opacity: 0; transition: opacity .2s ease; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { opacity: 1; }
+
+.progress-grid {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(to right, transparent, #22d3ee, #a78bfa, transparent);
+  background-size: 200% 100%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+  z-index: 9999;
+  pointer-events: none;
+}
+@keyframes progress-slide {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* Form controls (Tailwind forms plugin gives a baseline; we add focus glow). */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.2);
+  border-color: rgba(34, 211, 238, 0.6) !important;
+}
+
+/* Prose tweaks for editorial pages — dark, readable. */
+.prose-grid {
+  color: #cbd5e1;
+}
+.prose-grid h1, .prose-grid h2, .prose-grid h3 { color: #f1f5f9; }
+.prose-grid a { color: #67e8f9; text-decoration: underline; text-underline-offset: 3px; }
+.prose-grid a:hover { color: #a5f3fc; }
+.prose-grid code {
+  background: rgba(34,211,238,0.08);
+  color: #67e8f9;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.92em;
+  border: 1px solid rgba(34,211,238,0.15);
+}
+.prose-grid pre {
+  background: #0b0d14;
+  border: 1px solid rgba(148,163,184,0.15);
+  border-radius: 0.5rem;
+}
+.prose-grid blockquote {
+  border-left: 2px solid rgba(34,211,238,0.4);
+  color: #94a3b8;
+}
+
+/* Print: hide chrome. */
+@media print {
+  header, footer, [data-no-print] { display: none !important; }
+  body { background: white; color: black; }
+}
+
+/* Reduced-motion: kill drifting backdrops & progress slides. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

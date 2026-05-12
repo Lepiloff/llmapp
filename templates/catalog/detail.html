@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% load static catalog_extras %}
+
+{% block title %}{{ app.meta_title|default:app.name }} · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ app.meta_description|default:app.short_description }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ app.name }} · {{ SITE_NAME }}{% endblock %}
+{% block og_description %}{{ app.short_description }}{% endblock %}
+{% block og_image %}{% if app.cover_image %}{{ SITE_BASE_URL }}{{ app.cover_image.url }}{% elif app.logo %}{{ SITE_BASE_URL }}{{ app.logo.url }}{% else %}{{ block.super }}{% endif %}{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "{{ app.name|escapejs }}",
+  "description": "{{ app.short_description|escapejs }}",
+  "url": "{{ SITE_BASE_URL }}{{ app.get_absolute_url }}",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web"
+  {% if app.developer_name %}, "author": { "@type": "Organization", "name": "{{ app.developer_name|escapejs }}"{% if app.developer_url %}, "url": "{{ app.developer_url }}"{% endif %} }{% endif %}
+  {% if app.logo %}, "image": "{{ SITE_BASE_URL }}{{ app.logo.url }}"{% endif %}
+}
+</script>
+{% endblock %}
+
+{% block content %}
+{% trust_badges app as badges %}
+
+{# Breadcrumbs #}
+<nav aria-label="Breadcrumb" class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
+  <ol class="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-slate-500">
+    <li><a href="/" class="hover:text-cyan-300">root</a></li>
+    <li aria-hidden="true">/</li>
+    <li><a href="/apps/" class="hover:text-cyan-300">apps</a></li>
+    <li aria-hidden="true">/</li>
+    <li class="text-slate-300 truncate max-w-xs">{{ app.slug }}</li>
+  </ol>
+</nav>
+
+{# ===================== HERO ===================== #}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8 pb-10">
+  <div class="grid lg:grid-cols-[1fr_320px] gap-10">
+    <div>
+      <div class="flex items-start gap-5">
+        {% if app.logo %}
+          <img src="{{ app.logo.url }}" alt="{{ app.name }} logo" width="80" height="80"
+               class="h-20 w-20 rounded-xl object-cover border border-edge-strong bg-elevated">
+        {% else %}
+          <div class="h-20 w-20 rounded-xl border border-edge-strong bg-gradient-to-br from-cyan-500/15 to-violet-500/15 flex items-center justify-center font-mono text-cyan-300 text-2xl">
+            {{ app.name|slice:":2"|upper }}
+          </div>
+        {% endif %}
+
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            {% for lt in app.listing_types.all %}
+              <span class="font-mono text-[10px] uppercase tracking-widest border border-cyan-400/30 bg-cyan-400/5 text-cyan-300 px-2 py-0.5 rounded">{{ lt.name }}</span>
+            {% endfor %}
+            {% if app.launch_status != 'live' %}
+              <span class="font-mono text-[10px] uppercase tracking-widest border border-amber-300/30 bg-amber-300/5 text-amber-300 px-2 py-0.5 rounded">{{ app.get_launch_status_display }}</span>
+            {% endif %}
+            {% if app.pricing_model and app.pricing_model != 'unknown' %}
+              <span class="font-mono text-[10px] uppercase tracking-widest border border-edge-strong bg-elevated text-slate-300 px-2 py-0.5 rounded">{{ app.get_pricing_model_display }}</span>
+            {% endif %}
+          </div>
+
+          <h1 class="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-slate-100">{{ app.name }}</h1>
+          {% if app.developer_name %}
+            <p class="mt-1 font-mono text-sm text-slate-400">
+              by
+              {% if app.developer_url %}
+                <a href="{{ app.developer_url }}" rel="nofollow noopener" target="_blank" class="text-cyan-300 hover:underline">{{ app.developer_name }}</a>
+              {% else %}
+                <span class="text-slate-300">{{ app.developer_name }}</span>
+              {% endif %}
+            </p>
+          {% endif %}
+        </div>
+      </div>
+
+      <p class="mt-6 text-lg text-slate-300 leading-relaxed">{{ app.short_description }}</p>
+
+      {% if app.verdict %}
+        <div class="mt-6 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-4">
+          <p class="font-mono text-[10px] uppercase tracking-widest text-cyan-300">// editor verdict</p>
+          <p class="mt-1 text-slate-200">{{ app.verdict }}</p>
+        </div>
+      {% endif %}
+
+      {# Action buttons #}
+      <div class="mt-7 flex flex-wrap gap-2.5">
+        {% if app.official_page_url %}
+          <a href="{% url 'analytics:outbound_redirect' slug=app.slug %}?url={{ app.official_page_url|urlencode }}&type=official&src=detail"
+             target="_blank" rel="noopener"
+             class="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2.5 text-sm font-medium text-slate-950 shadow-glow-cyan hover:shadow-glow-violet transition">
+            Open official page
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+          </a>
+        {% endif %}
+        {% if app.install_url %}
+          <a href="{% url 'analytics:outbound_redirect' slug=app.slug %}?url={{ app.install_url|urlencode }}&type=install&src=detail"
+             target="_blank" rel="noopener"
+             class="inline-flex items-center gap-1.5 rounded-md border border-cyan-400/40 bg-cyan-400/5 px-4 py-2.5 text-sm font-medium text-cyan-300 hover:bg-cyan-400/10 transition">
+            Install
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </a>
+        {% endif %}
+        {% if app.repo_url %}
+          <a href="{% url 'analytics:outbound_redirect' slug=app.slug %}?url={{ app.repo_url|urlencode }}&type=repo&src=detail"
+             target="_blank" rel="noopener"
+             class="inline-flex items-center gap-1.5 rounded-md border border-edge-strong px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-violet-400/40 hover:text-violet-300 transition">
+            Source
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          </a>
+        {% endif %}
+        <a href="{% url 'submissions:claim_app' slug=app.slug %}"
+           class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-edge-strong px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 hover:border-cyan-400/30 transition ml-auto">
+          Claim this listing
+        </a>
+      </div>
+
+      {# Long description #}
+      {% if app.long_description %}
+        <div class="mt-10 prose-grid max-w-none">
+          <h2 class="text-xl font-semibold text-slate-100">About</h2>
+          <div class="mt-3 whitespace-pre-line text-slate-300 leading-relaxed">{{ app.long_description }}</div>
+        </div>
+      {% endif %}
+
+      {# Capabilities matrix #}
+      {% if app.appcapability_set.all %}
+        <div class="mt-10">
+          <h2 class="text-xl font-semibold text-slate-100">Capabilities</h2>
+          <p class="font-mono text-[11px] uppercase tracking-widest text-slate-500 mt-1">// what this listing can / can not do</p>
+          <ul class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {% for ac in app.appcapability_set.all %}
+              <li class="flex items-center gap-3 rounded-lg border border-edge-soft bg-surface/40 px-4 py-3">
+                {% if ac.value == 'yes' %}
+                  <span class="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-400/15 text-emerald-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M20 6 9 17l-5-5"/></svg>
+                  </span>
+                {% elif ac.value == 'no' %}
+                  <span class="flex h-6 w-6 items-center justify-center rounded-md bg-rose-400/15 text-rose-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </span>
+                {% else %}
+                  <span class="flex h-6 w-6 items-center justify-center rounded-md bg-slate-500/15 text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  </span>
+                {% endif %}
+                <div class="flex-1">
+                  <p class="text-sm text-slate-200">{{ ac.capability.label }}</p>
+                  {% if ac.note %}<p class="font-mono text-[11px] text-slate-500">{{ ac.note }}</p>{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {# Platform availability #}
+      {% if app.platform_links.all %}
+        <div class="mt-10">
+          <h2 class="text-xl font-semibold text-slate-100">Platform availability</h2>
+          <p class="font-mono text-[11px] uppercase tracking-widest text-slate-500 mt-1">// per-ecosystem support matrix</p>
+          <div class="mt-5 space-y-3">
+            {% for link in app.platform_links.all %}
+              <div class="rounded-lg border border-edge-soft bg-surface/40 p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="font-semibold text-slate-100">{{ link.platform.name }}</p>
+                    <p class="font-mono text-[11px] uppercase tracking-widest text-slate-500 mt-0.5">
+                      {{ link.get_compatibility_status_display }}
+                      {% if link.region_availability and link.region_availability != 'unknown' %} · {{ link.get_region_availability_display }}{% endif %}
+                    </p>
+                  </div>
+                  {% if link.official_directory_url %}
+                    <a href="{% url 'analytics:outbound_redirect' slug=app.slug %}?url={{ link.official_directory_url|urlencode }}&type=platform&src=detail"
+                       target="_blank" rel="noopener"
+                       class="text-xs font-mono uppercase tracking-widest text-cyan-300 hover:text-cyan-200 transition inline-flex items-center gap-1">
+                      open in directory
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+                    </a>
+                  {% endif %}
+                </div>
+
+                {% if link.supported_plans %}
+                  <div class="mt-3 flex flex-wrap gap-1.5">
+                    {% for plan in link.supported_plans %}
+                      <span class="font-mono text-[10px] uppercase tracking-wider border border-edge-strong bg-elevated text-slate-300 px-2 py-0.5 rounded">{{ plan }}</span>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+
+                {% if link.supported_models %}
+                  <p class="mt-3 text-sm text-slate-400">
+                    <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">models:</span>
+                    <span class="font-mono">{{ link.supported_models }}</span>
+                  </p>
+                {% endif %}
+
+                {% if link.scope_summary %}
+                  <p class="mt-2 text-sm text-slate-400"><span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">scopes:</span> {{ link.scope_summary }}</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+
+    {# Sidebar #}
+    <aside class="space-y-5 lg:sticky lg:top-24 self-start">
+      {# Trust panel #}
+      <div class="rounded-xl border border-edge-strong bg-surface/60 p-5">
+        <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">// trust signals</p>
+        <ul class="mt-3 space-y-3">
+          {% for badge in badges %}
+            <li class="flex items-start gap-3">
+              {% if badge.active %}
+                <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300 shrink-0 mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+              {% else %}
+                <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-500/15 text-slate-500 shrink-0 mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </span>
+              {% endif %}
+              <span class="text-sm {% if badge.active %}text-slate-200{% else %}text-slate-500{% endif %}">{{ badge.label }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      {# Categories #}
+      {% if app.categories.all %}
+        <div class="rounded-xl border border-edge-strong bg-surface/60 p-5">
+          <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">// categories</p>
+          <ul class="mt-3 flex flex-wrap gap-1.5">
+            {% for c in app.categories.all %}
+              <li><a href="{{ c.get_absolute_url }}" class="font-mono text-[11px] uppercase tracking-wider border border-edge-strong bg-elevated hover:border-cyan-400/40 hover:text-cyan-300 text-slate-300 px-2 py-1 rounded transition">{{ c.name }}</a></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {# Use cases #}
+      {% if app.use_cases.all %}
+        <div class="rounded-xl border border-edge-strong bg-surface/60 p-5">
+          <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">// use cases</p>
+          <ul class="mt-3 space-y-1.5">
+            {% for uc in app.use_cases.all %}
+              <li class="text-sm text-slate-300">— {{ uc.title }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {# Meta #}
+      <div class="rounded-xl border border-edge-strong bg-surface/60 p-5 font-mono text-xs">
+        <dl class="space-y-2 text-slate-400">
+          <div class="flex justify-between"><dt class="uppercase tracking-widest text-slate-500">first seen</dt><dd>{{ app.first_seen_at|date:"Y-m-d" }}</dd></div>
+          {% if app.last_checked_at %}
+            <div class="flex justify-between"><dt class="uppercase tracking-widest text-slate-500">last check</dt><dd>{{ app.last_checked_at|date:"Y-m-d" }}</dd></div>
+          {% endif %}
+          <div class="flex justify-between"><dt class="uppercase tracking-widest text-slate-500">slug</dt><dd class="text-slate-300 truncate ml-2">{{ app.slug }}</dd></div>
+        </dl>
+      </div>
+    </aside>
+  </div>
+</section>
+
+{# ===================== SIMILAR ===================== #}
+{% if similar %}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="related vectors" title="Similar tools" %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+    {% for s in similar %}
+      {% include "partials/app_card.html" with app=s %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

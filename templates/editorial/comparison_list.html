@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Comparisons · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}Head-to-head comparisons of LLM apps and tools.{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// versus</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100"><span class="text-gradient">Comparisons</span></h1>
+    <p class="mt-3 max-w-2xl text-slate-400">Side-by-side breakdowns of competing tools — features, scopes, plans, edge cases.</p>
+  </div>
+</section>
+
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% if comparisons %}
+    <ul class="grid sm:grid-cols-2 gap-5">
+      {% for c in comparisons %}
+        <li>
+          <a href="{{ c.get_absolute_url }}" class="card-grid block p-6" data-corners>
+            <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">comparison</p>
+            <h2 class="mt-2 text-lg font-semibold text-slate-100 hover:text-cyan-300 transition">
+              {{ c.primary_app.name }} <span class="text-slate-500">vs</span> {{ c.secondary_app.name }}
+            </h2>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="rounded-xl border border-dashed border-edge-strong bg-surface/40 p-10 text-center text-slate-400">No comparisons yet.</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Submission received · {{ SITE_NAME }}{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-24 text-center">
+  <div class="inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-violet-400 text-slate-950 shadow-glow-cyan">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6"><path d="M20 6 9 17l-5-5"/></svg>
+  </div>
+  <p class="mt-6 font-mono text-[11px] uppercase tracking-widest text-cyan-300">// transmitted</p>
+  <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-100">Submission received</h1>
+  <p class="mt-3 text-slate-400">
+    Your listing is in the moderation queue. Our editors typically review submissions within 3 business days. We'll email you if we need anything else.
+  </p>
+  <div class="mt-8 flex justify-center gap-3">
+    <a href="/" class="inline-flex items-center gap-1.5 rounded-md border border-edge-strong px-4 py-2 text-sm text-slate-200 hover:border-cyan-400/40 hover:text-cyan-300 transition">Back to home</a>
+    <a href="/apps/" class="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2 text-sm font-medium text-slate-950 hover:shadow-glow-cyan transition">Browse catalog</a>
+  </div>
+</section>
+{% endblock %}

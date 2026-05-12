@@ -1,0 +1,12 @@
+{% if suggestions %}
+  <ul class="absolute z-30 mt-2 w-full rounded-lg border border-edge-strong bg-elevated/95 backdrop-blur shadow-glow-cyan overflow-hidden">
+    {% for s in suggestions %}
+      <li>
+        <a href="/apps/?q={{ s|urlencode }}"
+           class="block px-4 py-2 text-sm text-slate-200 hover:bg-cyan-400/10 hover:text-cyan-200 transition font-mono">
+          <span class="text-slate-500">›</span> {{ s }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

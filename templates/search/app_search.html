@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load static catalog_extras %}
+
+{% block title %}{% if query %}{{ query }} · {% endif %}Catalog · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}Search and filter LLM apps, connectors and MCP servers by platform, category, and capabilities.{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// catalog</p>
+    <h1 class="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-slate-100">All listings</h1>
+    <p class="mt-2 text-slate-400 max-w-2xl">Search by task or filter by platform, category, and capability. Every change updates without a page reload — and the URL stays sharable.</p>
+  </div>
+</section>
+
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+  <form id="filters"
+        action="/apps/" method="get"
+        hx-get="/apps/"
+        hx-target="#results"
+        hx-select="#results > *"
+        hx-trigger="change, submit, keyup delay:350ms from:#q"
+        hx-push-url="true"
+        hx-include="this"
+        hx-indicator="#filters-indicator"
+        class="grid lg:grid-cols-[280px_1fr] gap-8">
+
+    {# ===================== SIDEBAR ===================== #}
+    <div class="lg:sticky lg:top-24 self-start">
+      <div class="lg:hidden mb-4">
+        <details class="rounded-lg border border-edge-strong bg-surface/40">
+          <summary class="cursor-pointer px-4 py-3 font-mono text-[11px] uppercase tracking-widest text-cyan-300">show filters</summary>
+          <div class="px-3 pb-3">
+            {% include "partials/facets.html" with filter_options=filter_options current_filters=current_filters %}
+          </div>
+        </details>
+      </div>
+      <div class="hidden lg:block">
+        {% include "partials/facets.html" with filter_options=filter_options current_filters=current_filters %}
+      </div>
+    </div>
+
+    {# ===================== MAIN ===================== #}
+    <div>
+      {# Search bar #}
+      <div class="relative mb-6">
+        <svg class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" name="q" type="search" autocomplete="off" value="{{ query }}"
+               placeholder='search the grid — try "summarize PDFs", "GitHub MCP", "calendar"…'
+               class="w-full rounded-lg border border-edge-strong bg-surface/70 pl-12 pr-12 py-3.5 text-base text-slate-100 placeholder:text-slate-500 font-mono focus:border-cyan-400/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/20">
+        <span id="filters-indicator" class="htmx-indicator absolute right-4 top-1/2 -translate-y-1/2 text-cyan-300">
+          <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+        </span>
+      </div>
+
+      {# Active chip strip #}
+      {% if query or current_filters.platform or current_filters.category or current_filters.capabilities %}
+        <div class="flex flex-wrap items-center gap-2 mb-6">
+          <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">active:</span>
+          {% if query %}
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider border border-cyan-400/30 bg-cyan-400/5 text-cyan-300 px-2 py-1 rounded">
+              q: {{ query }}
+            </span>
+          {% endif %}
+          {% if current_filters.platform %}
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider border border-edge-strong bg-elevated text-slate-300 px-2 py-1 rounded">platform: {{ current_filters.platform }}</span>
+          {% endif %}
+          {% if current_filters.category %}
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider border border-edge-strong bg-elevated text-slate-300 px-2 py-1 rounded">category: {{ current_filters.category }}</span>
+          {% endif %}
+          {% for cap in current_filters.capabilities %}
+            <span class="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider border border-edge-strong bg-elevated text-slate-300 px-2 py-1 rounded">cap: {{ cap }}</span>
+          {% endfor %}
+          <a href="/apps/" class="ml-auto text-xs text-slate-500 hover:text-cyan-300 transition font-mono uppercase tracking-widest">reset</a>
+        </div>
+      {% endif %}
+
+      <div id="results">
+        {% include "search/_results.html" %}
+      </div>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% comment %}
+Reusable section header with a small mono kicker, big title, optional CTA.
+Usage:
+  {% include "partials/section_header.html" with kicker="trending now" title="Top of the grid" cta_url="/apps/?sort=popular" cta_label="See all" %}
+{% endcomment %}
+<div class="flex items-end justify-between gap-6 mb-6">
+  <div>
+    {% if kicker %}<p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// {{ kicker }}</p>{% endif %}
+    <h2 class="mt-1 text-2xl sm:text-3xl font-semibold tracking-tight text-slate-100">{{ title }}</h2>
+    {% if subtitle %}<p class="mt-1 text-slate-400 max-w-2xl">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if cta_url %}
+    <a href="{{ cta_url }}" class="hidden sm:inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-slate-400 hover:text-cyan-300 transition whitespace-nowrap">
+      {{ cta_label|default:"View all" }}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </a>
+  {% endif %}
+</div>
+<div class="rule-grad mb-8"></div>

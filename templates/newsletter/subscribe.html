@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Subscribe · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}Weekly digest of new LLM apps, deep dives and field reports.{% endblock %}
+
+{% block extra_head %}
+<style>
+  form input[type="email"], form select {
+    width: 100%; background: rgba(11,13,20,0.6); border: 1px solid rgba(148,163,184,0.20);
+    color: #e2e8f0; border-radius: 0.5rem; padding: 0.625rem 0.875rem; font-size: 0.875rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-20">
+  <div class="text-center">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// signal/digest</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100"><span class="text-gradient">Weekly transmission</span></h1>
+    <p class="mt-3 text-slate-400">
+      One curated email per week. New tools, sharp comparisons, and the occasional field report. Unsubscribe with one click.
+    </p>
+  </div>
+
+  <form method="post" class="mt-10 rounded-xl border border-edge-strong bg-surface/60 p-6 sm:p-8 space-y-5">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="rounded-md border border-rose-400/30 bg-rose-500/5 p-3 text-sm text-rose-200">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% include "partials/form_field.html" with field=form.email label="Email" %}
+    {% include "partials/form_field.html" with field=form.frequency label="Frequency" %}
+
+    <button type="submit"
+            class="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2.5 text-sm font-medium text-slate-950 shadow-glow-cyan hover:shadow-glow-violet transition">
+      Subscribe
+    </button>
+    <p class="text-xs text-slate-500 text-center">Double opt-in. We never share your email.</p>
+  </form>
+</section>
+{% endblock %}

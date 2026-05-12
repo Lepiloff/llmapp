@@ -1,0 +1,16 @@
+{% load static %}
+{% for app in items %}
+  {% include "partials/app_card.html" with app=app %}
+{% endfor %}
+
+{% if next_cursor %}
+  <div hx-get="{% url 'catalog:newly_added' %}?cursor={{ next_cursor }}"
+       hx-trigger="revealed"
+       hx-swap="outerHTML"
+       class="col-span-full flex justify-center py-8">
+    <span class="htmx-indicator inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-cyan-300">
+      <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+      Decoding more…
+    </span>
+  </div>
+{% endif %}

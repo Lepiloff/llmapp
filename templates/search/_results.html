@@ -1,0 +1,27 @@
+{% comment %}
+Search results partial — also returned standalone for htmx swaps.
+The outer template selects this fragment with `hx-select="#results > *"`,
+so we render a single root element wrapping the page chunk.
+{% endcomment %}
+<div>
+  <div class="flex items-center justify-between mb-4">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-slate-500">
+      {{ total_results|default:page_obj.paginator.count }} {{ total_results|default:page_obj.paginator.count|pluralize:"result,results" }}
+      {% if query %}for <span class="text-slate-300">"{{ query }}"</span>{% endif %}
+    </p>
+    <noscript>
+      <button type="submit" class="rounded-md bg-cyan-400/10 border border-cyan-400/30 text-cyan-300 px-3 py-1.5 text-xs font-mono uppercase tracking-widest">apply filters</button>
+    </noscript>
+  </div>
+
+  {% if page_obj.object_list %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+      {% for app in page_obj.object_list %}
+        {% include "partials/app_card.html" with app=app %}
+      {% endfor %}
+    </div>
+    {% include "partials/pagination.html" with page_obj=page_obj %}
+  {% else %}
+    {% include "partials/empty_state.html" %}
+  {% endif %}
+</div>

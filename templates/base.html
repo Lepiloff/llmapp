@@ -1,0 +1,252 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en" class="bg-void text-slate-200 antialiased scroll-smooth">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05060a">
+  <meta name="color-scheme" content="dark">
+
+  {# ---------- SEO meta ---------- #}
+  <title>{% block title %}{{ SITE_NAME }} — Discover apps, connectors and agents for ChatGPT, Claude, Gemini & MCP{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}{{ SITE_TAGLINE }}{% endblock %}">
+  <link rel="canonical" href="{% block canonical %}{{ SITE_BASE_URL }}{{ request.path }}{% endblock %}">
+
+  <meta property="og:site_name" content="{{ SITE_NAME }}">
+  <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+  <meta property="og:title" content="{% block og_title %}{{ SITE_NAME }}{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}{{ SITE_TAGLINE }}{% endblock %}">
+  <meta property="og:url" content="{{ SITE_BASE_URL }}{{ request.path }}">
+  <meta property="og:image" content="{% block og_image %}{{ SITE_BASE_URL }}{% static 'img/og-default.png' %}{% endblock %}">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{% block twitter_title %}{{ SITE_NAME }}{% endblock %}">
+  <meta name="twitter:description" content="{% block twitter_description %}{{ SITE_TAGLINE }}{% endblock %}">
+
+  {% block extra_meta %}{% endblock %}
+
+  {# ---------- Fonts ---------- #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+  {# ---------- Tailwind via Play CDN (zero-config; production should compile) ---------- #}
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <script>
+    /* Neural Grid design tokens */
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            void: '#05060a',
+            surface: '#0b0d14',
+            elevated: '#11141d',
+            'edge-soft': 'rgba(148,163,184,0.10)',
+            'edge-strong': 'rgba(148,163,184,0.20)',
+          },
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+          },
+          boxShadow: {
+            'glow-cyan': '0 0 30px -10px rgba(34, 211, 238, 0.55)',
+            'glow-violet': '0 0 30px -10px rgba(167, 139, 250, 0.55)',
+            'glow-emerald': '0 0 28px -12px rgba(52, 211, 153, 0.55)',
+          },
+          animation: {
+            'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'drift': 'drift 22s ease-in-out infinite',
+          },
+          keyframes: {
+            drift: {
+              '0%, 100%': { transform: 'translate3d(0,0,0) scale(1)' },
+              '50%':       { transform: 'translate3d(2%,-3%,0) scale(1.05)' },
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  {# ---------- htmx + Alpine ---------- #}
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+
+  {# ---------- Custom styles ---------- #}
+  <link rel="stylesheet" href="{% static 'src/app.css' %}">
+  {% block extra_head %}{% endblock %}
+
+  {# ---------- Site-wide JSON-LD ---------- #}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "{{ SITE_NAME }}",
+    "url": "{{ SITE_BASE_URL }}",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "{{ SITE_BASE_URL }}/apps/?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+  {% block structured_data %}{% endblock %}
+
+  <link rel="icon" type="image/svg+xml" href="{% static 'img/favicon.svg' %}">
+</head>
+
+<body class="min-h-screen relative selection:bg-cyan-400/30 selection:text-cyan-50">
+  {# ---------- Ambient backdrop ---------- #}
+  <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    {# grid lines #}
+    <div class="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.05)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_30%,transparent_75%)]"></div>
+    {# floating accent orbs #}
+    <div class="absolute -top-40 -left-20 h-[480px] w-[480px] rounded-full bg-cyan-500/10 blur-3xl animate-drift"></div>
+    <div class="absolute top-1/3 -right-32 h-[520px] w-[520px] rounded-full bg-violet-500/10 blur-3xl animate-drift" style="animation-delay: -8s"></div>
+  </div>
+
+  {# ---------- Top navigation ---------- #}
+  <header class="sticky top-0 z-40 border-b border-edge-soft bg-void/70 backdrop-blur-xl"
+          x-data="{ open: false }">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex h-16 items-center justify-between">
+        <div class="flex items-center gap-8">
+          <a href="/" class="group flex items-center gap-2.5">
+            <span class="relative flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-950 shadow-glow-cyan">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+                <path d="M12 2 4 7l8 5 8-5-8-5Z"/><path d="m4 12 8 5 8-5"/><path d="m4 17 8 5 8-5"/>
+              </svg>
+            </span>
+            <span class="font-mono text-sm tracking-widest text-slate-100 group-hover:text-cyan-300 transition">
+              LLM<span class="text-cyan-400">/</span>MARKET
+            </span>
+          </a>
+
+          <nav class="hidden md:flex items-center gap-1 text-sm">
+            <a href="/apps/" class="px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5 transition">Catalog</a>
+            <a href="/chatgpt-apps/" class="px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5 transition">ChatGPT</a>
+            <a href="/claude-connectors/" class="px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5 transition">Claude</a>
+            <a href="/mcp-servers/" class="px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5 transition">MCP</a>
+            <a href="/blog/" class="px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5 transition">Blog</a>
+          </nav>
+        </div>
+
+        <div class="flex items-center gap-3">
+          {# Inline mini-search; expands to /apps/ on submit #}
+          <form action="/apps/" method="get" role="search" class="hidden md:block">
+            <label class="sr-only" for="nav-q">Search apps</label>
+            <div class="relative">
+              <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="nav-q" name="q" type="search" placeholder="search the grid…"
+                     class="w-64 rounded-md border border-edge-strong bg-surface/60 pl-9 pr-3 py-2 text-sm font-mono text-slate-200 placeholder:text-slate-500 placeholder:font-mono focus:border-cyan-400/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/20">
+            </div>
+          </form>
+
+          <a href="{% url 'submissions:submit_app' %}"
+             class="hidden md:inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-3 py-2 text-sm font-medium text-slate-950 shadow-glow-cyan hover:shadow-glow-violet transition">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 5v14M5 12h14"/></svg>
+            Submit
+          </a>
+
+          <button type="button" @click="open = !open"
+                  class="md:hidden inline-flex items-center justify-center rounded-md p-2 text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5"
+                  :aria-expanded="open" aria-controls="mobile-menu" aria-label="Open menu">
+            <svg x-show="!open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            <svg x-show="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" style="display:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      {# Mobile menu #}
+      <div id="mobile-menu" x-show="open" x-transition x-cloak class="md:hidden pb-4 space-y-1">
+        <form action="/apps/" method="get" role="search" class="mb-3">
+          <input name="q" type="search" placeholder="search the grid…"
+                 class="w-full rounded-md border border-edge-strong bg-surface/60 px-3 py-2 text-sm font-mono text-slate-200 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/20">
+        </form>
+        <a href="/apps/" class="block px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5">Catalog</a>
+        <a href="/chatgpt-apps/" class="block px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5">ChatGPT</a>
+        <a href="/claude-connectors/" class="block px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5">Claude</a>
+        <a href="/mcp-servers/" class="block px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5">MCP</a>
+        <a href="/blog/" class="block px-3 py-2 rounded-md text-slate-300 hover:text-cyan-300 hover:bg-cyan-400/5">Blog</a>
+        <a href="{% url 'submissions:submit_app' %}" class="block px-3 py-2 rounded-md text-cyan-300 hover:bg-cyan-400/5">Submit a listing →</a>
+      </div>
+    </div>
+  </header>
+
+  {# ---------- Flash messages ---------- #}
+  {% if messages %}
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4 space-y-2">
+      {% for message in messages %}
+        <div role="status"
+             class="flex items-start gap-3 rounded-md border px-4 py-3 text-sm
+                    {% if message.tags == 'error' %}border-rose-400/30 bg-rose-500/5 text-rose-200
+                    {% elif message.tags == 'success' %}border-emerald-400/30 bg-emerald-500/5 text-emerald-200
+                    {% else %}border-edge-strong bg-surface text-slate-200{% endif %}">
+          <span class="font-mono text-[10px] tracking-widest uppercase mt-0.5">[{{ message.tags|default:"info" }}]</span>
+          <span>{{ message }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# ---------- Page content ---------- #}
+  <main id="main" class="relative">
+    {% block content %}{% endblock %}
+  </main>
+
+  {# ---------- Footer ---------- #}
+  <footer class="mt-24 border-t border-edge-soft">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 grid gap-10 md:grid-cols-4">
+      <div class="space-y-3">
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-950">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 2 4 7l8 5 8-5-8-5Z"/><path d="m4 12 8 5 8-5"/><path d="m4 17 8 5 8-5"/></svg>
+          </span>
+          <span class="font-mono text-sm tracking-widest">LLM<span class="text-cyan-400">/</span>MARKET</span>
+        </div>
+        <p class="text-sm text-slate-400 max-w-xs">{{ SITE_TAGLINE }}</p>
+      </div>
+
+      <div>
+        <h3 class="font-mono text-[11px] tracking-widest uppercase text-slate-500 mb-3">Explore</h3>
+        <ul class="space-y-2 text-sm">
+          <li><a href="/apps/" class="text-slate-300 hover:text-cyan-300">All listings</a></li>
+          <li><a href="/chatgpt-apps/" class="text-slate-300 hover:text-cyan-300">ChatGPT apps</a></li>
+          <li><a href="/claude-connectors/" class="text-slate-300 hover:text-cyan-300">Claude connectors</a></li>
+          <li><a href="/mcp-servers/" class="text-slate-300 hover:text-cyan-300">MCP servers</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="font-mono text-[11px] tracking-widest uppercase text-slate-500 mb-3">Editorial</h3>
+        <ul class="space-y-2 text-sm">
+          <li><a href="{% url 'editorial:post_list' %}" class="text-slate-300 hover:text-cyan-300">Blog</a></li>
+          <li><a href="{% url 'editorial:collection_list' %}" class="text-slate-300 hover:text-cyan-300">Collections</a></li>
+          <li><a href="{% url 'editorial:comparison_list' %}" class="text-slate-300 hover:text-cyan-300">Comparisons</a></li>
+          <li><a href="{% url 'newsletter:issue_archive' %}" class="text-slate-300 hover:text-cyan-300">Newsletter archive</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="font-mono text-[11px] tracking-widest uppercase text-slate-500 mb-3">Contribute</h3>
+        <ul class="space-y-2 text-sm">
+          <li><a href="{% url 'submissions:submit_app' %}" class="text-slate-300 hover:text-cyan-300">Submit a listing</a></li>
+          <li><a href="{% url 'newsletter:subscribe' %}" class="text-slate-300 hover:text-cyan-300">Newsletter</a></li>
+          <li><a href="/sitemap.xml" class="text-slate-300 hover:text-cyan-300">Sitemap</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="border-t border-edge-soft">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+        <p>© {% now "Y" %} {{ SITE_NAME }}. Built for the post-prompt era.</p>
+        <p class="font-mono tracking-widest">v1.0 // signal/noise ratio: high</p>
+      </div>
+    </div>
+  </footer>
+
+  {# ---------- htmx CSRF + indicator hookups ---------- #}
+  <script src="{% static 'src/app.js' %}" defer></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

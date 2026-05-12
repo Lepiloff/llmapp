@@ -1,0 +1,55 @@
+[project]
+name = "llmmarket"
+version = "0.1.0"
+description = "LLM App Market — directory of apps, connectors and MCP servers for LLM assistants."
+requires-python = ">=3.12"
+dependencies = [
+  # Core
+  "Django>=5.0,<6.0",
+  "psycopg[binary]>=3.1,<4.0",
+  "python-decouple>=3.8",
+  "dj-database-url>=2.1",
+
+  # Background / cache
+  "celery>=5.3,<6.0",
+  "redis>=5.0",
+  "django-redis>=5.4",
+
+  # HTTP / scraping
+  "requests>=2.32",
+  "python-Levenshtein>=0.25",
+
+  # Security / forms
+  "django-ratelimit>=4.1",
+  "django-cors-headers>=4.4",
+
+  # Observability
+  "sentry-sdk>=2.0",
+  "python-json-logger>=2.0",
+
+  # Other
+  "gunicorn>=22.0",
+  "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-django>=4.8",
+  "factory-boy>=3.3",
+  "django-debug-toolbar>=4.4",
+  "freezegun>=1.5",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.dev"
+python_files = "tests.py test_*.py *_tests.py"
+addopts = "--reuse-db"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+ignore = ["E501"]

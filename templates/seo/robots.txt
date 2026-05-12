@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /go/
+Disallow: /submit/success/
+Disallow: /newsletter/confirm/
+Disallow: /newsletter/unsubscribe/
+Disallow: /newsletter/track/
+
+Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ SITE_NAME }} — The catalog for ChatGPT, Claude, Gemini & MCP apps{% endblock %}
+{% block meta_description %}A curated, transparent catalog of LLM apps, connectors and MCP servers. Search by task, filter by platform, see who built it.{% endblock %}
+
+{% block content %}
+{# ===================== HERO ===================== #}
+<section class="relative overflow-hidden">
+  <div aria-hidden="true" class="pointer-events-none absolute inset-0 -z-10">
+    <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent"></div>
+    {# subtle scanlines #}
+    <div class="absolute inset-0 bg-[repeating-linear-gradient(0deg,transparent,transparent_3px,rgba(255,255,255,0.02)_3px,rgba(255,255,255,0.02)_4px)] opacity-50"></div>
+  </div>
+
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-20 pb-16 sm:pt-28 sm:pb-24">
+    <div class="max-w-3xl">
+      <p class="font-mono text-[11px] uppercase tracking-[0.25em] text-cyan-300">// llm app market · v1</p>
+      <h1 class="mt-4 text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-slate-100">
+        Find the right
+        <span class="text-gradient">LLM tool</span>
+        for the job.
+      </h1>
+      <p class="mt-5 text-lg text-slate-300 max-w-2xl">
+        A curated catalog of apps, connectors and MCP servers for
+        <span class="text-cyan-300">ChatGPT</span>,
+        <span class="text-cyan-300">Claude</span>,
+        <span class="text-cyan-300">Gemini</span> and beyond — searchable by task, ranked by transparent signals.
+      </p>
+
+      {# Hero search — degrades to a normal GET to /apps/ #}
+      <form action="/apps/" method="get" role="search" class="mt-8 max-w-2xl">
+        <label for="hero-q" class="sr-only">Search apps</label>
+        <div class="relative group">
+          <svg class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-300 transition" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="hero-q" name="q" type="search" autocomplete="off"
+                 placeholder='try "summarize PDFs", "GitHub MCP", "image to slides"…'
+                 class="w-full rounded-lg border border-edge-strong bg-surface/70 backdrop-blur pl-12 pr-32 py-4 text-base text-slate-100 placeholder:text-slate-500 font-mono focus:border-cyan-400/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/20">
+          <button type="submit"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2 text-sm font-medium text-slate-950 shadow-glow-cyan hover:shadow-glow-violet transition">
+            Search
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 font-mono">
+          <span class="uppercase tracking-widest">popular:</span>
+          <a href="/apps/?q=summarize" class="px-2 py-0.5 rounded border border-edge-strong hover:border-cyan-400/40 hover:text-cyan-300 transition">summarize</a>
+          <a href="/apps/?q=github" class="px-2 py-0.5 rounded border border-edge-strong hover:border-cyan-400/40 hover:text-cyan-300 transition">github</a>
+          <a href="/apps/?q=database" class="px-2 py-0.5 rounded border border-edge-strong hover:border-cyan-400/40 hover:text-cyan-300 transition">database</a>
+          <a href="/apps/?q=email" class="px-2 py-0.5 rounded border border-edge-strong hover:border-cyan-400/40 hover:text-cyan-300 transition">email</a>
+          <a href="/apps/?q=calendar" class="px-2 py-0.5 rounded border border-edge-strong hover:border-cyan-400/40 hover:text-cyan-300 transition">calendar</a>
+        </div>
+      </form>
+    </div>
+
+    {# Stats strip — schematic, mono font. #}
+    <dl class="mt-14 grid grid-cols-2 sm:grid-cols-4 gap-px bg-edge-soft border border-edge-soft rounded-xl overflow-hidden">
+      <div class="bg-void/60 p-5">
+        <dt class="font-mono text-[10px] uppercase tracking-widest text-slate-500">listings</dt>
+        <dd class="mt-1 text-2xl font-semibold text-slate-100 font-mono">{{ newly_added|length|default:"—" }}+</dd>
+      </div>
+      <div class="bg-void/60 p-5">
+        <dt class="font-mono text-[10px] uppercase tracking-widest text-slate-500">platforms</dt>
+        <dd class="mt-1 text-2xl font-semibold text-slate-100 font-mono">{{ platforms|length }}</dd>
+      </div>
+      <div class="bg-void/60 p-5">
+        <dt class="font-mono text-[10px] uppercase tracking-widest text-slate-500">categories</dt>
+        <dd class="mt-1 text-2xl font-semibold text-slate-100 font-mono">{{ categories|length }}</dd>
+      </div>
+      <div class="bg-void/60 p-5">
+        <dt class="font-mono text-[10px] uppercase tracking-widest text-slate-500">verified</dt>
+        <dd class="mt-1 text-2xl font-semibold text-emerald-300 font-mono inline-flex items-center gap-1.5">
+          live
+          <span class="relative inline-flex h-2 w-2"><span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-50 animate-ping"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span></span>
+        </dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+{# ===================== PLATFORMS ===================== #}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
+  {% include "partials/section_header.html" with kicker="ecosystems" title="Browse by platform" subtitle="Each ecosystem has its own surface, scopes and quirks. Start at the source." %}
+
+  <ul class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+    {% for p in platforms %}
+      <li>
+        <a href="{{ p.get_absolute_url }}" class="group block rounded-lg border border-edge-strong bg-surface/50 hover:bg-surface hover:border-cyan-400/40 transition p-4">
+          <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500 group-hover:text-cyan-300 transition">/{{ p.public_path }}</span>
+          <p class="mt-2 font-semibold text-slate-100 group-hover:text-cyan-200 transition">{{ p.name }}</p>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{# ===================== FEATURED ===================== #}
+{% if featured %}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="editorial picks" title="Featured tools" subtitle="Hand-selected by editors for quality, novelty, or sheer leverage." cta_url="/apps/?sort=quality" cta_label="See all featured" %}
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+    {% for app in featured %}
+      {% include "partials/app_card.html" with app=app %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ===================== TRENDING ===================== #}
+{% if trending %}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="signal · last 7 days" title="Trending now" subtitle="Ranked by outbound clicks in the trailing window. No vanity metrics." cta_url="/apps/?sort=popular" cta_label="View trending" %}
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+    {% for app in trending %}
+      {% include "partials/app_card.html" with app=app %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ===================== CATEGORIES ===================== #}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="taxonomy" title="By category" %}
+
+  <ul class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+    {% for c in categories %}
+      <li>
+        <a href="{{ c.get_absolute_url }}" class="group block rounded-lg border border-edge-strong bg-surface/50 hover:bg-surface hover:border-violet-400/40 transition p-4">
+          <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500 group-hover:text-violet-300 transition">/{{ c.slug }}</span>
+          <p class="mt-2 font-semibold text-slate-100 group-hover:text-violet-200 transition">{{ c.name }}</p>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{# ===================== NEWLY ADDED ===================== #}
+{% if newly_added %}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="newly indexed" title="Fresh in the grid" cta_url="/apps/?sort=newest" cta_label="See all new" %}
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+       id="newly-added-grid">
+    {% for app in newly_added %}
+      {% include "partials/app_card.html" with app=app %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ===================== SUBMIT CTA ===================== #}
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20">
+  <div class="relative overflow-hidden rounded-2xl border border-edge-strong bg-gradient-to-br from-surface to-elevated p-8 sm:p-12">
+    <div aria-hidden="true" class="absolute -top-32 -right-32 h-80 w-80 rounded-full bg-cyan-500/15 blur-3xl"></div>
+    <div aria-hidden="true" class="absolute -bottom-32 -left-32 h-80 w-80 rounded-full bg-violet-500/15 blur-3xl"></div>
+
+    <div class="relative max-w-2xl">
+      <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// contribute</p>
+      <h2 class="mt-3 text-3xl font-semibold tracking-tight text-slate-100">Built an LLM tool? Get it indexed.</h2>
+      <p class="mt-3 text-slate-400">
+        Free, fast, and reviewed by humans. No login, no spam — just submit the canonical URL and we handle the rest.
+      </p>
+
+      <div class="mt-6 flex flex-wrap gap-3">
+        <a href="{% url 'submissions:submit_app' %}"
+           class="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2.5 text-sm font-medium text-slate-950 shadow-glow-cyan hover:shadow-glow-violet transition">
+          Submit a listing
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+        <a href="{% url 'newsletter:subscribe' %}"
+           class="inline-flex items-center gap-1.5 rounded-md border border-cyan-400/40 bg-cyan-400/5 px-4 py-2.5 text-sm font-medium text-cyan-300 hover:bg-cyan-400/10 transition">
+          Subscribe to weekly digest
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

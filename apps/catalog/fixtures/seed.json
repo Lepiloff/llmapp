@@ -1,0 +1,34 @@
+[
+  {"model": "catalog.platform", "pk": 1, "fields": {"name": "ChatGPT", "slug": "chatgpt", "public_path": "chatgpt-apps", "sort_order": 10, "website_url": "https://chat.openai.com/", "description": "OpenAI ChatGPT and the ChatGPT App Directory."}},
+  {"model": "catalog.platform", "pk": 2, "fields": {"name": "Claude", "slug": "claude", "public_path": "claude-connectors", "sort_order": 20, "website_url": "https://claude.ai/", "description": "Anthropic Claude and Claude Connectors."}},
+  {"model": "catalog.platform", "pk": 3, "fields": {"name": "Gemini", "slug": "gemini", "public_path": "gemini-apps", "sort_order": 30, "website_url": "https://gemini.google.com/", "description": "Google Gemini and its connected apps."}},
+  {"model": "catalog.platform", "pk": 4, "fields": {"name": "MCP", "slug": "mcp", "public_path": "mcp-servers", "sort_order": 40, "website_url": "https://modelcontextprotocol.io/", "description": "Public servers that implement the Model Context Protocol."}},
+  {"model": "catalog.platform", "pk": 5, "fields": {"name": "Enterprise", "slug": "enterprise", "public_path": "enterprise-agents", "sort_order": 50, "website_url": "", "description": "Enterprise agent marketplaces (Salesforce, Microsoft, ...)."}},
+
+  {"model": "catalog.listingtype", "pk": 1, "fields": {"name": "ChatGPT App", "slug": "chatgpt-app", "sort_order": 10, "description": "Application published in the ChatGPT App Directory."}},
+  {"model": "catalog.listingtype", "pk": 2, "fields": {"name": "Claude Connector", "slug": "claude-connector", "sort_order": 20, "description": "Verified Claude Connector."}},
+  {"model": "catalog.listingtype", "pk": 3, "fields": {"name": "Interactive Claude App", "slug": "interactive-claude-app", "sort_order": 30, "description": "Connector that renders interactive UI inside Claude."}},
+  {"model": "catalog.listingtype", "pk": 4, "fields": {"name": "MCP Server", "slug": "mcp-server", "sort_order": 40, "description": "Public Model Context Protocol server."}},
+  {"model": "catalog.listingtype", "pk": 5, "fields": {"name": "Gemini App", "slug": "gemini-app", "sort_order": 50, "description": "App or service Gemini can use with the user's permission."}},
+  {"model": "catalog.listingtype", "pk": 6, "fields": {"name": "Enterprise Agent", "slug": "enterprise-agent", "sort_order": 60, "description": "Pre-built agent from an enterprise marketplace."}},
+
+  {"model": "catalog.category", "pk": 1, "fields": {"name": "Productivity & Task Management", "slug": "productivity", "sort_order": 10}},
+  {"model": "catalog.category", "pk": 2, "fields": {"name": "Developer Tools", "slug": "developer-tools", "sort_order": 20}},
+  {"model": "catalog.category", "pk": 3, "fields": {"name": "Research & Knowledge", "slug": "research", "sort_order": 30}},
+  {"model": "catalog.category", "pk": 4, "fields": {"name": "Files & Documents", "slug": "files", "sort_order": 40}},
+  {"model": "catalog.category", "pk": 5, "fields": {"name": "Design & Creative", "slug": "design", "sort_order": 50}},
+  {"model": "catalog.category", "pk": 6, "fields": {"name": "Sales & CRM", "slug": "sales-crm", "sort_order": 60}},
+  {"model": "catalog.category", "pk": 7, "fields": {"name": "Marketing & Content", "slug": "marketing", "sort_order": 70}},
+  {"model": "catalog.category", "pk": 8, "fields": {"name": "Data & Analytics", "slug": "data-analytics", "sort_order": 80}},
+  {"model": "catalog.category", "pk": 9, "fields": {"name": "Travel & Local Search", "slug": "travel", "sort_order": 90}},
+  {"model": "catalog.category", "pk": 10, "fields": {"name": "Commerce & Shopping", "slug": "commerce", "sort_order": 100}},
+
+  {"model": "catalog.capability", "pk": 1, "fields": {"key": "read_data", "label": "Reads user data", "sort_order": 10, "description": "Can read user data through the integration."}},
+  {"model": "catalog.capability", "pk": 2, "fields": {"key": "write_actions", "label": "Performs actions", "sort_order": 20, "description": "Can take actions on behalf of the user."}},
+  {"model": "catalog.capability", "pk": 3, "fields": {"key": "interactive_ui", "label": "Interactive UI in chat", "sort_order": 30, "description": "Renders a UI inside the chat."}},
+  {"model": "catalog.capability", "pk": 4, "fields": {"key": "auth_required", "label": "Requires authentication", "sort_order": 40, "description": "Requires the user to sign in / authorize."}},
+  {"model": "catalog.capability", "pk": 5, "fields": {"key": "local_setup_required", "label": "Requires local setup", "sort_order": 50, "description": "Requires local installation on the user's machine."}},
+  {"model": "catalog.capability", "pk": 6, "fields": {"key": "remote_available", "label": "Hosted / remote available", "sort_order": 60, "description": "A hosted / remote endpoint is provided."}},
+  {"model": "catalog.capability", "pk": 7, "fields": {"key": "open_source", "label": "Open source", "sort_order": 70, "description": "Source code is publicly available."}},
+  {"model": "catalog.capability", "pk": 8, "fields": {"key": "api_available", "label": "Standalone API", "sort_order": 80, "description": "Has a separate, standalone API."}}
+]

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}500 · Internal error · {{ SITE_NAME }}{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-32 text-center">
+  <p class="font-mono text-[11px] uppercase tracking-widest text-rose-300">// error 500 · upstream malfunction</p>
+  <h1 class="mt-4 text-6xl font-semibold tracking-tight font-mono"><span class="text-gradient">5 · 0 · 0</span></h1>
+  <p class="mt-4 text-xl text-slate-200">Something on our side blew a fuse.</p>
+  <p class="mt-2 text-slate-400">We were notified automatically. Try refreshing in a moment, or head home.</p>
+  <div class="mt-8">
+    <a href="/" class="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-4 py-2 text-sm font-medium text-slate-950 hover:shadow-glow-cyan transition">Back to home</a>
+  </div>
+</section>
+{% endblock %}

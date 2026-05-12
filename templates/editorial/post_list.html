@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load catalog_extras %}
+
+{% block title %}Blog · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}Deep dives, how-tos, comparisons and roundups for builders working with LLM platforms.{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-violet-300">// signal · field reports</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100">The <span class="text-gradient">Field Log</span></h1>
+    <p class="mt-3 max-w-2xl text-slate-400">Long-form notes from the edge of the LLM ecosystem — guides, comparisons, and editorial roundups.</p>
+
+    {# Type filters #}
+    <div class="mt-6 flex flex-wrap items-center gap-2">
+      <a href="{% url 'editorial:post_list' %}"
+         class="font-mono text-[11px] uppercase tracking-widest px-3 py-1.5 rounded border {% if not current_type %}border-cyan-400/40 text-cyan-300 bg-cyan-400/5{% else %}border-edge-strong text-slate-400 hover:text-cyan-300{% endif %} transition">all</a>
+      {% for value, label in post_types %}
+        <a href="?type={{ value }}"
+           class="font-mono text-[11px] uppercase tracking-widest px-3 py-1.5 rounded border {% if current_type == value %}border-cyan-400/40 text-cyan-300 bg-cyan-400/5{% else %}border-edge-strong text-slate-400 hover:text-cyan-300{% endif %} transition">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 grid lg:grid-cols-[1fr_280px] gap-10">
+  <div>
+    {% if page_obj.object_list %}
+      <ul class="space-y-6">
+        {% for post in page_obj.object_list %}
+          <li>
+            <a href="{{ post.get_absolute_url }}" class="card-grid block p-6" data-corners>
+              <div class="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-2">
+                <span class="text-cyan-300">{{ post.get_post_type_display }}</span>
+                <span>·</span>
+                <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"Y-m-d" }}</time>
+                <span>·</span>
+                <span>{{ post.reading_time_minutes }} min read</span>
+              </div>
+              <h2 class="text-xl font-semibold text-slate-100 hover:text-cyan-300 transition">{{ post.title }}</h2>
+              {% if post.subtitle %}<p class="mt-1 text-sm text-slate-400">{{ post.subtitle }}</p>{% endif %}
+              <p class="mt-3 text-slate-300 line-clamp-3">{{ post.excerpt }}</p>
+              {% if post.tags.all %}
+                <ul class="mt-4 flex flex-wrap gap-1.5">
+                  {% for t in post.tags.all|slice:":4" %}
+                    <li><span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-edge-strong bg-elevated text-slate-400">#{{ t.name }}</span></li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+      {% include "partials/pagination.html" with page_obj=page_obj %}
+    {% else %}
+      <div class="rounded-xl border border-dashed border-edge-strong bg-surface/40 p-10 text-center text-slate-400">
+        No posts yet — check back soon.
+      </div>
+    {% endif %}
+  </div>
+
+  {# Sidebar #}
+  <aside class="space-y-6 lg:sticky lg:top-24 self-start">
+    {% if featured_posts %}
+      <div class="rounded-xl border border-edge-strong bg-surface/60 p-5">
+        <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">// featured</p>
+        <ul class="mt-3 space-y-3">
+          {% for p in featured_posts %}
+            <li><a href="{{ p.get_absolute_url }}" class="text-sm text-slate-200 hover:text-cyan-300 transition block">{{ p.title }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% if popular_tags %}
+      <div class="rounded-xl border border-edge-strong bg-surface/60 p-5">
+        <p class="font-mono text-[10px] uppercase tracking-widest text-slate-500">// tags</p>
+        <ul class="mt-3 flex flex-wrap gap-1.5">
+          {% for t in popular_tags %}
+            <li><a href="?tag={{ t.slug }}" class="font-mono text-[11px] uppercase tracking-wider px-2 py-1 rounded border {% if current_tag and current_tag.slug == t.slug %}border-cyan-400/40 text-cyan-300 bg-cyan-400/5{% else %}border-edge-strong bg-elevated text-slate-300 hover:text-cyan-300{% endif %} transition">#{{ t.name }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-5">
+      <p class="font-mono text-[10px] uppercase tracking-widest text-cyan-300">// signal/digest</p>
+      <p class="mt-2 text-sm text-slate-200">Weekly roundup of new tools, deep dives and field reports — straight to your inbox.</p>
+      <a href="{% url 'newsletter:subscribe' %}" class="mt-3 inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-cyan-400 to-violet-400 px-3 py-2 text-sm font-medium text-slate-950 hover:shadow-glow-cyan transition">Subscribe</a>
+    </div>
+  </aside>
+</section>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ platform.name }} apps · {{ SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ platform.description|default:"Apps and connectors available on" }} {{ platform.name }}.{% endblock %}
+
+{% block content %}
+<section class="border-b border-edge-soft">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14">
+    <p class="font-mono text-[11px] uppercase tracking-widest text-cyan-300">// platform</p>
+    <h1 class="mt-3 text-4xl font-semibold tracking-tight text-slate-100">
+      <span class="text-gradient">{{ platform.name }}</span> ecosystem
+    </h1>
+    {% if platform.description %}
+      <p class="mt-3 max-w-2xl text-slate-400">{{ platform.description }}</p>
+    {% endif %}
+    <div class="mt-5 flex flex-wrap gap-3 text-sm">
+      <a href="/apps/?platform={{ platform.slug }}" class="inline-flex items-center gap-1.5 rounded-md border border-cyan-400/40 bg-cyan-400/5 px-3 py-2 text-cyan-300 hover:bg-cyan-400/10 transition">
+        Filter the full catalog by {{ platform.name }}
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+      {% if platform.website_url %}
+        <a href="{{ platform.website_url }}" target="_blank" rel="nofollow noopener" class="text-slate-400 hover:text-cyan-300 inline-flex items-center gap-1.5">
+          Official site
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+        </a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+  {% include "partials/section_header.html" with kicker="top picks" title="Top apps on this platform" subtitle="Ordered by quality score and recency." %}
+
+  {% if top_apps %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      {% for app in top_apps %}
+        {% include "partials/app_card.html" with app=app %}
+      {% endfor %}
+    </div>
+  {% else %}
+    {% include "partials/empty_state.html" %}
+  {% endif %}
+</section>
+{% endblock %}

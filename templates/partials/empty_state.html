@@ -1,0 +1,18 @@
+<div class="col-span-full">
+  <div class="rounded-xl border border-dashed border-edge-strong bg-surface/40 p-10 text-center">
+    <div class="mx-auto h-10 w-10 rounded-md bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 text-cyan-300"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </div>
+    <p class="mt-3 font-mono text-[11px] uppercase tracking-widest text-slate-500">no matches in the grid</p>
+    <h3 class="mt-1 text-lg font-semibold text-slate-200">{% block empty_title %}Nothing here yet{% endblock %}</h3>
+    <p class="mt-2 text-sm text-slate-400 max-w-md mx-auto">
+      {% block empty_body %}Try widening your search, removing a filter, or submitting the listing you wish existed.{% endblock %}
+    </p>
+    <div class="mt-5">
+      <a href="{% url 'submissions:submit_app' %}" class="inline-flex items-center gap-1.5 rounded-md border border-cyan-400/40 bg-cyan-400/5 px-3 py-2 text-sm font-medium text-cyan-300 hover:bg-cyan-400/10 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M12 5v14M5 12h14"/></svg>
+        Submit a listing
+      </a>
+    </div>
+  </div>
+</div>

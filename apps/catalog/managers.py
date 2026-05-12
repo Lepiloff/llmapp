@@ -1,0 +1,90 @@
+"""Catalog managers and queryset extensions.
+
+The published manager is the public-visibility gate: it is the only path
+through which users see an `App`. Editors talk to `App.objects`; the rest
+of the codebase reaches for `App.published`.
+"""
+from __future__ import annotations
+
+from django.db import models
+from django.db.models import Prefetch, QuerySet
+
+
+class AppQuerySet(QuerySet):
+    """Reusable query helpers — keep view code declarative and DRY."""
+
+    def published(self) -> "AppQuerySet":
+        from .models import App
+
+        return self.filter(status=App.AppStatus.PUBLISHED, is_indexable=True)
+
+    def for_listing(self) -> "AppQuerySet":
+        """Preload everything needed to render an `app_card` partial.
+
+        N+1 prevention: list pages render dozens of cards; without this
+        prefetch each card would issue separate queries for platforms,
+        categories, listing_types.
+        """
+        return self.prefetch_related("platforms", "categories", "listing_types")
+
+    def for_detail(self) -> "AppQuerySet":
+        """Preload everything needed to render the app detail page."""
+        from .models import AppCapability, AppPlatform
+
+        return self.prefetch_related(
+            "listing_types",
+            "categories",
+            "use_cases",
+            "sources",
+            Prefetch(
+                "platform_links",
+                queryset=AppPlatform.objects.select_related("platform"),
+            ),
+            Prefetch(
+                "appcapability_set",
+                queryset=AppCapability.objects.select_related("capability"),
+            ),
+        )
+
+    def featured(self) -> "AppQuerySet":
+        return self.filter(is_featured=True)
+
+    def trending(self, window_days: int = 7) -> "AppQuerySet":
+        """Order by outbound clicks in the trailing window."""
+        from datetime import timedelta
+
+        from django.db.models import Count, Q
+        from django.utils import timezone
+
+        since = timezone.now() - timedelta(days=window_days)
+        return self.annotate(
+            click_count=Count("clicks", filter=Q(clicks__created_at__gte=since))
+        ).order_by("-click_count", "-quality_score")
+
+
+class PublishedAppManager(models.Manager):
+    """Always-published queryset for public views.
+
+    Using a dedicated manager is safer than re-applying the filter in every
+    view: a missing `.published()` call cannot leak drafts to the public.
+    """
+
+    def get_queryset(self) -> AppQuerySet:
+        from .models import App
+
+        return AppQuerySet(self.model, using=self._db).filter(
+            status=App.AppStatus.PUBLISHED,
+            is_indexable=True,
+            launch_status__in=[
+                App.LaunchStatus.LIVE,
+                App.LaunchStatus.BETA,
+                App.LaunchStatus.WAITLIST,
+            ]
+        ).exclude(launch_status=App.LaunchStatus.DEPRECATED)
+
+
+class AppManager(models.Manager):
+    """Default editor-side manager — sees everything, including drafts."""
+
+    def get_queryset(self) -> AppQuerySet:
+        return AppQuerySet(self.model, using=self._db)

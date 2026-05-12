@@ -1,0 +1,18 @@
+{% comment %}
+A consistently-styled field wrapper for any Django form field.
+Usage: {% include "partials/form_field.html" with field=form.email label="Email" %}
+{% endcomment %}
+<div class="space-y-1.5">
+  <label for="{{ field.id_for_label }}" class="block font-mono text-[11px] uppercase tracking-widest text-slate-400">
+    {{ label|default:field.label }}{% if field.field.required %}<span class="text-cyan-400">*</span>{% endif %}
+  </label>
+  {{ field }}
+  {% if field.help_text %}
+    <p class="text-xs text-slate-500">{{ field.help_text }}</p>
+  {% endif %}
+  {% if field.errors %}
+    <ul class="text-xs text-rose-300 space-y-0.5">
+      {% for error in field.errors %}<li>· {{ error }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</div>

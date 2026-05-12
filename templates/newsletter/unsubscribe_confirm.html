@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Unsubscribe · {{ SITE_NAME }}{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-24 text-center">
+  <p class="font-mono text-[11px] uppercase tracking-widest text-amber-300">// confirm</p>
+  <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-100">Unsubscribe from the digest?</h1>
+  <p class="mt-3 text-slate-400">{{ subscriber.email }} will stop receiving the weekly transmission.</p>
+
+  <form method="post" class="mt-8 inline-flex gap-3">
+    {% csrf_token %}
+    <a href="/" class="inline-flex items-center gap-1.5 rounded-md border border-edge-strong px-4 py-2 text-sm text-slate-200 hover:border-cyan-400/40 hover:text-cyan-300 transition">Cancel</a>
+    <button type="submit" class="inline-flex items-center gap-1.5 rounded-md border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-200 hover:bg-rose-500/20 transition">Yes, unsubscribe</button>
+  </form>
+</section>
+{% endblock %}
