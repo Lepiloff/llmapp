@@ -33,6 +33,26 @@ class MCPRegistrySchemaError(Exception):
     """Raised when a record's shape doesn't match the version we know."""
 
 
+def _is_json_safe(value) -> bool:
+    """Return True when ``value`` is something Django's JSONField can store as-is.
+
+    The check is structural: dict / list / scalar primitives are all
+    json.dumps-able. Anything exotic (custom objects, bytes, ...) is rejected
+    so callers can fall back to ``repr(value)`` before persisting to the
+    ``UnparsedRegistryRecord.payload`` JSONField, avoiding a serialization
+    error that would mask the original parse failure.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_safe(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(k, str) and _is_json_safe(v) for k, v in value.items()
+        )
+    return False
+
+
 class MCPRegistrySource(BaseSource):
     """Ingest from the official MCP Registry."""
 
@@ -86,35 +106,79 @@ class MCPRegistrySource(BaseSource):
                 )
                 return
 
-            payload = resp.json() or {}
+            # The Registry is preview status (business.md § 13.4): every
+            # external shape we touch is treated as untrusted.
+            try:
+                payload = resp.json()
+            except ValueError:
+                # JSONDecodeError is a subclass of ValueError on stdlib + requests.
+                logger.exception(
+                    "mcp_registry_invalid_json", extra={"cursor": cursor}
+                )
+                return
+
+            if not isinstance(payload, dict):
+                logger.warning(
+                    "mcp_registry_payload_not_dict",
+                    extra={
+                        "cursor": cursor,
+                        "received_type": type(payload).__name__,
+                    },
+                )
+                return
+
             schema_version = str(payload.get("schema_version", "unknown"))
             self.observed_schema_versions.add(schema_version)
 
-            for record in payload.get("servers", []):
+            servers = payload.get("servers")
+            if servers is None:
+                # Missing key — treat as empty page; honour next_cursor below.
+                servers = []
+            if not isinstance(servers, list):
+                logger.warning(
+                    "mcp_registry_servers_not_list",
+                    extra={
+                        "cursor": cursor,
+                        "schema_version": schema_version,
+                        "received_type": type(servers).__name__,
+                    },
+                )
+                return
+
+            for record in servers:
                 try:
                     yield self._normalize(record)
                 except MCPRegistrySchemaError as exc:
                     self.unparsed.append(
                         {
-                            "record": record,
+                            "record": record if _is_json_safe(record) else repr(record),
                             "error": str(exc),
                             "schema_version": schema_version,
                         }
                     )
                     logger.warning(
                         "mcp_registry_unparsed",
-                        extra={"id": record.get("id"), "error": str(exc)},
+                        extra={
+                            "record_id": (
+                                record.get("id") if isinstance(record, dict) else None
+                            ),
+                            "error": str(exc),
+                        },
                     )
                     continue
 
             cursor = payload.get("next_cursor")
-            if not cursor:
+            if not isinstance(cursor, str) or not cursor:
                 break
 
     # ------------------------------------------------------------------
     # Normalization
     # ------------------------------------------------------------------
-    def _normalize(self, record: dict) -> AppDraft:
+    def _normalize(self, record) -> AppDraft:
+        if not isinstance(record, dict):
+            raise MCPRegistrySchemaError(
+                f"record is not a dict (got {type(record).__name__})"
+            )
         try:
             name = record["name"]
             external_id = record["id"]
