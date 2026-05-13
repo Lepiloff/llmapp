@@ -1,0 +1,21 @@
+{% extends "admin/change_form.html" %}
+
+{% block submit_buttons_bottom %}
+  {% if original and not original.is_resolved %}
+    <div class="submit-row">
+      {% if original.payload.proposed_verdict %}
+        <input type="submit" value="Apply proposed verdict" name="_apply_verdict">
+      {% endif %}
+      {% if original.payload.proposed_launch_status %}
+        <input type="submit" value="Apply launch status" name="_apply_launch_status">
+      {% endif %}
+      {% if original.payload.proposed_pricing_model %}
+        <input type="submit" value="Apply pricing" name="_apply_pricing_model">
+      {% endif %}
+      <input type="submit" value="Reject all" name="_reject_all">
+      <input type="submit" value="Mark resolved" name="_mark_resolved">
+      <input type="submit" value="Approve & publish" name="_approve_publish">
+    </div>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

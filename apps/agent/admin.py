@@ -1,13 +1,18 @@
-"""Admin observability for the LLM-pipeline agent.
-
-Phase 1 surfaces the operational tables as read-only views; Phase 2
-will add custom diff-rendering / "apply proposal" actions on
-``NeedsReviewQueueEntry``.
-"""
+"""Admin observability and review workflow for the LLM-pipeline agent."""
 from __future__ import annotations
 
-from django.contrib import admin
-from django.utils.html import format_html
+import json
+
+from django.contrib import admin, messages
+from django.contrib.admin.utils import quote
+from django.http import HttpRequest, HttpResponseRedirect
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.html import escape, format_html, format_html_join
+from django.utils.safestring import mark_safe
+
+from apps.catalog.models import App
+from apps.catalog.services import recalc_quality_score, transition_to_published
 
 from .models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 
@@ -110,19 +115,78 @@ class LLMCallLogAdmin(admin.ModelAdmin):
 
 @admin.register(NeedsReviewQueueEntry)
 class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
+    change_form_template = "admin/agent/needsreviewqueueentry/change_form.html"
     list_display = (
         "id",
         "app",
         "kind",
+        "status_badge",
+        "review_outcome",
         "created_at",
         "resolved_at",
         "resolved_by",
         "payload_preview",
     )
-    list_filter = ("kind", "resolved_at", "created_at")
+    list_filter = (
+        "kind",
+        "review_outcome",
+        "resolved_at",
+        "created_at",
+        "task__run__source_type",
+    )
     search_fields = ("app__name", "app__slug", "resolution_note")
-    readonly_fields = ("app", "task", "kind", "payload", "created_at")
+    actions = (
+        "action_apply_proposed_verdict",
+        "action_apply_proposed_launch_status",
+        "action_apply_proposed_pricing_model",
+        "action_reject_all",
+        "action_mark_resolved",
+        "action_approve_and_publish",
+    )
+    readonly_fields = (
+        "app",
+        "task",
+        "kind",
+        "current_app_state",
+        "proposal_panel",
+        "llm_context",
+        "payload",
+        "created_at",
+        "resolved_at",
+        "resolved_by",
+        "review_outcome",
+        "resolution_note",
+    )
+    fieldsets = (
+        (None, {"fields": ("app", "task", "kind", "created_at")}),
+        ("Review", {"fields": ("current_app_state", "proposal_panel", "llm_context")}),
+        ("Raw payload", {"fields": ("payload",)}),
+        (
+            "Resolution",
+            {"fields": ("resolved_at", "resolved_by", "review_outcome", "resolution_note")},
+        ),
+    )
     date_hierarchy = "created_at"
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("app", "task", "task__run", "resolved_by")
+            .prefetch_related("task__llm_calls")
+        )
+
+    @admin.display(description="Status")
+    def status_badge(self, obj: NeedsReviewQueueEntry) -> str:
+        if obj.is_resolved:
+            return format_html(
+                '<span style="color:{};font-weight:600">resolved</span>',
+                "#198754",
+            )
+        return format_html(
+            '<span style="color:{};font-weight:600">open</span>',
+            "#b45309",
+        )
 
     def payload_preview(self, obj: NeedsReviewQueueEntry) -> str:
         text = str(obj.payload)
@@ -130,5 +194,281 @@ class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
 
     payload_preview.short_description = "Payload"
 
+    @admin.display(description="Current App")
+    def current_app_state(self, obj: NeedsReviewQueueEntry) -> str:
+        app = obj.app
+        app_url = reverse("admin:catalog_app_change", args=[quote(app.pk)])
+        rows = [
+            ("App", format_html('<a href="{}">{}</a>', app_url, app.name)),
+            ("Status", app.status),
+            ("Editorial review", app.editorial_review_status),
+            ("Platform verification", app.platform_verification_status),
+            ("Verdict", app.verdict or "—"),
+            ("Launch status", app.launch_status),
+            ("Pricing model", app.pricing_model),
+            ("Short description", app.short_description or "—"),
+            ("Official page", app.official_page_url or "—"),
+            ("Install URL", app.install_url or "—"),
+            ("Repo URL", app.repo_url or "—"),
+        ]
+        return _admin_table(rows)
+
+    @admin.display(description="LLM proposal")
+    def proposal_panel(self, obj: NeedsReviewQueueEntry) -> str:
+        payload = obj.payload or {}
+        rows: list[tuple[str, object]] = []
+        for key, label in (
+            ("proposed_verdict", "Proposed verdict"),
+            ("proposed_launch_status", "Proposed launch status"),
+            ("proposed_pricing_model", "Proposed pricing model"),
+            ("proposed_scope_summary", "Proposed scope summary"),
+            ("rationale", "Rationale"),
+        ):
+            value = payload.get(key)
+            if value:
+                rows.append((label, value))
+
+        skipped_fields = payload.get("skipped_field_updates") or []
+        skipped_caps = payload.get("skipped_capability_updates") or []
+        if skipped_fields:
+            rows.append(("Skipped field updates", _json_pretty(skipped_fields)))
+        if skipped_caps:
+            rows.append(("Skipped capability updates", _json_pretty(skipped_caps)))
+        if not rows:
+            rows.append(("Proposal", "No pending proposal fields in payload."))
+        return _admin_table(rows)
+
+    @admin.display(description="LLM context")
+    def llm_context(self, obj: NeedsReviewQueueEntry) -> str:
+        call = obj.task.llm_calls.order_by("-created_at").first() if obj.task_id else None
+        rows = []
+        if obj.task_id:
+            task_url = reverse("admin:agent_enrichmenttask_change", args=[quote(obj.task_id)])
+            rows.append(("Task", format_html('<a href="{}">#{}</a>', task_url, obj.task_id)))
+        if obj.task and obj.task.run_id:
+            run_url = reverse("admin:agent_agentrun_change", args=[quote(obj.task.run_id)])
+            rows.append(("Run", format_html('<a href="{}">#{}</a>', run_url, obj.task.run_id)))
+        if call:
+            call_url = reverse("admin:agent_llmcalllog_change", args=[quote(call.pk)])
+            rows.extend(
+                [
+                    ("LLM call", format_html('<a href="{}">#{}</a>', call_url, call.pk)),
+                    ("Provider/model", f"{call.provider}/{call.model}"),
+                    ("Prompt version", call.prompt_version or "—"),
+                    ("Tokens", f"{call.input_tokens} in / {call.output_tokens} out"),
+                    ("Cost", f"${call.cost_usd}"),
+                    ("Latency", f"{call.latency_ms or 0} ms"),
+                ]
+            )
+        if not rows:
+            rows.append(("LLM call", "No linked LLM call."))
+        return _admin_table(rows)
+
+    def response_change(self, request: HttpRequest, obj: NeedsReviewQueueEntry):
+        button_to_action = {
+            "_apply_verdict": self._apply_proposed_verdict,
+            "_apply_launch_status": self._apply_proposed_launch_status,
+            "_apply_pricing_model": self._apply_proposed_pricing_model,
+            "_reject_all": self._reject_entry,
+            "_mark_resolved": self._mark_entry_resolved,
+            "_approve_publish": self._approve_and_publish_entry,
+        }
+        for button, handler in button_to_action.items():
+            if button in request.POST:
+                handler(request, obj)
+                return HttpResponseRedirect(".")
+        return super().response_change(request, obj)
+
+    @admin.action(description="Apply proposed verdict")
+    def action_apply_proposed_verdict(self, request, queryset):
+        count = sum(self._apply_proposed_verdict(request, entry, quiet=True) for entry in queryset)
+        self.message_user(request, f"Applied proposed verdict to {count} entry(s).")
+
+    @admin.action(description="Apply proposed launch_status")
+    def action_apply_proposed_launch_status(self, request, queryset):
+        count = sum(
+            self._apply_proposed_launch_status(request, entry, quiet=True)
+            for entry in queryset
+        )
+        self.message_user(request, f"Applied proposed launch_status to {count} entry(s).")
+
+    @admin.action(description="Apply proposed pricing_model")
+    def action_apply_proposed_pricing_model(self, request, queryset):
+        count = sum(
+            self._apply_proposed_pricing_model(request, entry, quiet=True)
+            for entry in queryset
+        )
+        self.message_user(request, f"Applied proposed pricing_model to {count} entry(s).")
+
+    @admin.action(description="Reject all proposals and mark resolved")
+    def action_reject_all(self, request, queryset):
+        count = sum(self._reject_entry(request, entry, quiet=True) for entry in queryset)
+        self.message_user(request, f"Rejected {count} entry(s).")
+
+    @admin.action(description="Mark resolved without applying")
+    def action_mark_resolved(self, request, queryset):
+        count = sum(self._mark_entry_resolved(request, entry, quiet=True) for entry in queryset)
+        self.message_user(request, f"Marked {count} entry(s) resolved.")
+
+    @admin.action(description="Approve App publish gate and mark queue resolved")
+    def action_approve_and_publish(self, request, queryset):
+        succeeded = 0
+        failures: list[str] = []
+        for entry in queryset.select_related("app"):
+            try:
+                if self._approve_and_publish_entry(request, entry, quiet=True):
+                    succeeded += 1
+            except ValueError as exc:
+                failures.append(f"{entry.app.name}: {exc}")
+        if failures:
+            self.message_user(request, "; ".join(failures), level=messages.WARNING)
+        self.message_user(request, f"Published {succeeded} app(s).")
+
+    def _apply_proposed_verdict(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        if entry.is_resolved:
+            return self._skip(request, quiet, "Entry is already resolved.")
+        verdict = (entry.payload or {}).get("proposed_verdict", "").strip()
+        if not verdict:
+            return self._skip(request, quiet, "No proposed verdict in this entry.")
+        App.objects.filter(pk=entry.app_id).update(verdict=verdict)
+        self._record_outcome(entry, NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED)
+        self._refresh_and_recalc(entry)
+        return self._ok(request, quiet, "Applied proposed verdict.")
+
+    def _apply_proposed_launch_status(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        if entry.is_resolved:
+            return self._skip(request, quiet, "Entry is already resolved.")
+        value = (entry.payload or {}).get("proposed_launch_status")
+        if value not in App.LaunchStatus.values:
+            return self._skip(request, quiet, "No valid proposed launch_status.")
+        App.objects.filter(pk=entry.app_id).update(launch_status=value)
+        self._record_outcome(entry, NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED)
+        self._refresh_and_recalc(entry)
+        return self._ok(request, quiet, "Applied proposed launch_status.")
+
+    def _apply_proposed_pricing_model(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        if entry.is_resolved:
+            return self._skip(request, quiet, "Entry is already resolved.")
+        value = (entry.payload or {}).get("proposed_pricing_model")
+        if value not in App.PricingModel.values:
+            return self._skip(request, quiet, "No valid proposed pricing_model.")
+        App.objects.filter(pk=entry.app_id).update(pricing_model=value)
+        self._record_outcome(entry, NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED)
+        self._refresh_and_recalc(entry)
+        return self._ok(request, quiet, "Applied proposed pricing_model.")
+
+    def _reject_entry(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        return self._resolve(
+            request,
+            entry,
+            note="Rejected all LLM proposals",
+            outcome=NeedsReviewQueueEntry.ReviewOutcome.REJECTED,
+            quiet=quiet,
+            message="Rejected all proposals and marked resolved.",
+        )
+
+    def _mark_entry_resolved(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        return self._resolve(
+            request,
+            entry,
+            note="Marked resolved by editor",
+            outcome=NeedsReviewQueueEntry.ReviewOutcome.NO_ACTION,
+            quiet=quiet,
+            message="Marked resolved.",
+        )
+
+    def _approve_and_publish_entry(
+        self, request, entry: NeedsReviewQueueEntry, *, quiet: bool = False
+    ) -> bool:
+        if entry.is_resolved:
+            return self._skip(request, quiet, "Entry is already resolved.")
+        transition_to_published(entry.app, request.user)
+        self._resolve(
+            request,
+            entry,
+            note="Approved and published by editor",
+            outcome=NeedsReviewQueueEntry.ReviewOutcome.PUBLISHED,
+            quiet=True,
+            message="",
+        )
+        return self._ok(request, quiet, "Published app and marked queue entry resolved.")
+
+    def _resolve(
+        self,
+        request,
+        entry: NeedsReviewQueueEntry,
+        *,
+        note: str,
+        outcome: str,
+        quiet: bool,
+        message: str,
+    ) -> bool:
+        if entry.is_resolved:
+            return self._skip(request, quiet, "Entry is already resolved.")
+        entry.resolved_at = timezone.now()
+        entry.resolved_by = request.user
+        entry.review_outcome = outcome
+        entry.resolution_note = note
+        entry.save(
+            update_fields=[
+                "resolved_at",
+                "resolved_by",
+                "review_outcome",
+                "resolution_note",
+            ]
+        )
+        return self._ok(request, quiet, message)
+
+    def _record_outcome(self, entry: NeedsReviewQueueEntry, outcome: str) -> None:
+        entry.review_outcome = outcome
+        entry.save(update_fields=["review_outcome"])
+
+    def _ok(self, request, quiet: bool, message: str) -> bool:
+        if not quiet and message:
+            self.message_user(request, message)
+        return True
+
+    def _skip(self, request, quiet: bool, message: str) -> bool:
+        if not quiet:
+            self.message_user(request, message, level=messages.WARNING)
+        return False
+
+    def _refresh_and_recalc(self, entry: NeedsReviewQueueEntry) -> None:
+        entry.app.refresh_from_db()
+        recalc_quality_score(entry.app)
+
     def has_add_permission(self, request) -> bool:
         return False
+
+
+def _admin_table(rows: list[tuple[str, object]]) -> str:
+    return format_html(
+        '<table style="width:100%;border-collapse:collapse">{}</table>',
+        format_html_join(
+            "",
+            (
+                '<tr><th style="width:220px;text-align:left;vertical-align:top;'
+                'border-bottom:1px solid #eee;padding:6px 8px">{}</th>'
+                '<td style="border-bottom:1px solid #eee;padding:6px 8px">{}</td></tr>'
+            ),
+            rows,
+        ),
+    )
+
+
+def _json_pretty(value) -> str:
+    return mark_safe(
+        "<pre style='white-space:pre-wrap;margin:0'>"
+        + escape(json.dumps(value, indent=2, sort_keys=True))
+        + "</pre>"
+    )

@@ -14,12 +14,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
+from django.core.mail import send_mail
+from django.db.models import Count
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.agent.llm.client import LLMProvider, build_provider
-from apps.agent.models import AgentRun, EnrichmentTask
+from apps.agent.models import AgentRun, EnrichmentTask, NeedsReviewQueueEntry
 from apps.agent.persist import (
     AppNotEligibleError,
     PersistResult,
@@ -234,3 +239,114 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error", "finished_at"])
         raise
+
+
+def review_acceptance_stats(days: int = 30) -> dict:
+    """Return editor outcome stats for Phase 2 acceptance-rate tracking."""
+    since = timezone.now() - timedelta(days=days)
+    qs = NeedsReviewQueueEntry.objects.filter(
+        created_at__gte=since,
+    ).exclude(review_outcome=NeedsReviewQueueEntry.ReviewOutcome.PENDING)
+
+    total_reviewed = qs.count()
+    accepted = qs.filter(
+        review_outcome__in=[
+            NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED,
+            NeedsReviewQueueEntry.ReviewOutcome.PUBLISHED,
+        ]
+    ).count()
+    rejected = qs.filter(
+        review_outcome=NeedsReviewQueueEntry.ReviewOutcome.REJECTED
+    ).count()
+    no_action = qs.filter(
+        review_outcome=NeedsReviewQueueEntry.ReviewOutcome.NO_ACTION
+    ).count()
+    return {
+        "days": days,
+        "reviewed": total_reviewed,
+        "accepted": accepted,
+        "rejected": rejected,
+        "no_action": no_action,
+        "acceptance_rate": (
+            round((accepted / total_reviewed) * 100, 2)
+            if total_reviewed
+            else 0.0
+        ),
+    }
+
+
+@shared_task
+def send_review_queue_digest() -> dict:
+    """Send one daily digest for open agent review queue entries.
+
+    This is intentionally a digest of the current open queue, not a
+    per-entry notification. The task is safe to run repeatedly: when
+    there are no open entries or no recipients, it sends nothing.
+    """
+    recipients = (
+        list(getattr(settings, "AGENT_REVIEW_DIGEST_EMAILS", []) or [])
+        or list(getattr(settings, "SUBMISSIONS_NOTIFY_EMAILS", []) or [])
+    )
+    open_entries = (
+        NeedsReviewQueueEntry.objects.filter(resolved_at__isnull=True)
+        .select_related("app", "task", "task__run")
+        .order_by("created_at")
+    )
+    open_count = open_entries.count()
+    if not open_count:
+        return {"sent": 0, "open_entries": 0, "skipped": "empty_queue"}
+    if not recipients:
+        return {
+            "sent": 0,
+            "open_entries": open_count,
+            "skipped": "no_recipients",
+        }
+
+    by_kind = dict(
+        open_entries.values("kind").annotate(count=Count("id")).values_list("kind", "count")
+    )
+    by_source = dict(
+        open_entries.values("task__run__source_type")
+        .annotate(count=Count("id"))
+        .values_list("task__run__source_type", "count")
+    )
+    admin_url = f"{settings.SITE_BASE_URL}{reverse('admin:agent_needsreviewqueueentry_changelist')}"
+
+    lines = [
+        f"{open_count} agent review queue entr{'y' if open_count == 1 else 'ies'} need editor attention.",
+        "",
+        f"Admin queue: {admin_url}",
+        "",
+        "By kind:",
+    ]
+    for kind, count in sorted(by_kind.items()):
+        lines.append(f"- {kind}: {count}")
+
+    lines.extend(["", "By source:"])
+    for source_type, count in sorted(by_source.items(), key=lambda item: str(item[0])):
+        lines.append(f"- {source_type or 'unknown'}: {count}")
+
+    lines.extend(["", "Oldest open entries:"])
+    for entry in open_entries[:10]:
+        detail_url = (
+            f"{settings.SITE_BASE_URL}"
+            f"{reverse('admin:agent_needsreviewqueueentry_change', args=[entry.pk])}"
+        )
+        lines.append(
+            f"- #{entry.pk} {entry.app.name} ({entry.kind}, created {entry.created_at:%Y-%m-%d}): {detail_url}"
+        )
+
+    sent = send_mail(
+        subject=f"[LLM App Market] {open_count} agent review item(s) need attention",
+        message="\n".join(lines),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=recipients,
+        fail_silently=False,
+    )
+    return {
+        "sent": sent,
+        "recipients": len(recipients),
+        "open_entries": open_count,
+        "by_kind": by_kind,
+        "by_source": by_source,
+    }

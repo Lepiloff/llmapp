@@ -189,6 +189,13 @@ class NeedsReviewQueueEntry(models.Model):
         REACTUALIZED = "reactualized", "Re-actualization diff"
         VANISHED = "vanished", "Source vanished"
 
+    class ReviewOutcome(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        ACCEPTED = "accepted", "Accepted by editor"
+        REJECTED = "rejected", "Rejected by editor"
+        NO_ACTION = "no_action", "Resolved without applying"
+        PUBLISHED = "published", "Approved and published"
+
     app = models.ForeignKey(
         "catalog.App", on_delete=models.CASCADE,
         related_name="review_queue_entries",
@@ -211,6 +218,12 @@ class NeedsReviewQueueEntry(models.Model):
         "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="agent_queue_resolutions",
     )
+    review_outcome = models.CharField(
+        max_length=20,
+        choices=ReviewOutcome.choices,
+        default=ReviewOutcome.PENDING,
+        help_text="Editor decision used for LLM acceptance-rate reporting.",
+    )
     resolution_note = models.CharField(max_length=300, blank=True)
 
     class Meta:
@@ -218,6 +231,10 @@ class NeedsReviewQueueEntry(models.Model):
         indexes = [
             models.Index(fields=["app", "-created_at"]),
             models.Index(fields=["kind", "resolved_at"]),
+            models.Index(
+                fields=["review_outcome", "-created_at"],
+                name="agent_needs_review__c4bfb5_idx",
+            ),
             models.Index(fields=["-created_at"]),
         ]
         ordering = ["-created_at"]

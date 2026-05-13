@@ -468,3 +468,64 @@ the reviewer asked for. Gate to Phase 1b (real LLM providers): OPEN.**
 **Phase 1 is complete. Discovery, batch automation, and editor review
 acceptance-rate measurement remain Phase 2+ gates; `AGENT_SOURCES_ENABLED`
 stays empty.**
+
+---
+
+## Phase 2 — Admin review queue, first editor workflow slice (2026-05-13)
+
+### Shipped
+
+* `NeedsReviewQueueEntryAdmin` is no longer a raw JSON-only view:
+  it renders current App state, structured LLM proposals, and linked
+  LLM context (`AgentRun`, `EnrichmentTask`, `LLMCallLog`) on the
+  change page.
+* Object-level review buttons added on unresolved entries:
+  `Apply proposed verdict`, `Apply launch status`, `Apply pricing`,
+  `Reject all`, `Mark resolved`, `Approve & publish`.
+* Bulk admin actions added for the same editor workflows. Publishing
+  goes through `apps.catalog.services.transition_to_published`, so the
+  existing business checklist remains the only publish gate.
+* Resolution metadata is recorded on queue entries:
+  `resolved_at`, `resolved_by`, and a short `resolution_note`.
+* `NeedsReviewQueueEntry.review_outcome` added for measurable review
+  outcomes (`accepted`, `rejected`, `no_action`, `published`) so Phase 1
+  quality gate #7 can be computed from DB state instead of parsing notes.
+* Daily digest task `apps.agent.tasks.send_review_queue_digest` added and
+  wired to Celery beat at 07:30 UTC. It sends one email listing the current
+  open queue to `AGENT_REVIEW_DIGEST_EMAILS`, falling back to
+  `SUBMISSIONS_NOTIFY_EMAILS`.
+* `apps.agent.tasks.review_acceptance_stats(days=30)` added for the
+  editor acceptance-rate measurement.
+* Agent hard constraints remain intact: none of this is reachable from
+  pipeline/persist code. These writes happen only after an authenticated
+  Django admin editor action.
+
+### Tests
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/ -v
+→ 88 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 108 passed
+```
+
+New coverage in `tests/agent/test_admin_review_queue.py`:
+
+| Scenario | Assertion |
+|---|---|
+| Change view render | Current App, proposal, LLM metadata, and action buttons are visible |
+| Apply proposed verdict | Writes `App.verdict`; queue entry remains unresolved for explicit editor closure |
+| Reject all | Marks entry resolved with editor attribution |
+| Bulk approve & publish | Uses `transition_to_published`; marks entry resolved only after successful publish |
+| Digest task | Sends a single email for open queue entries; skips empty queue / no recipients |
+| Acceptance stats | Counts accepted / rejected / no-action / published outcomes |
+
+### Status
+
+**Phase 2 implementation complete.** Remaining Phase 2 gate evidence is
+operational, not code: after real editors review at least 10 LLM proposals,
+run `review_acceptance_stats(days=30)` and record whether acceptance rate
+is ≥ 60% before scaling discovery.

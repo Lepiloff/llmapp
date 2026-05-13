@@ -186,6 +186,9 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="hello@llmappmarket.co
 SUBMISSIONS_NOTIFY_EMAILS = config(
     "SUBMISSIONS_NOTIFY_EMAILS", default="editor@llmappmarket.com", cast=Csv()
 )
+AGENT_REVIEW_DIGEST_EMAILS = config(
+    "AGENT_REVIEW_DIGEST_EMAILS", default="", cast=Csv()
+) or []
 
 # ---------------------------------------------------------------------------
 # Site
@@ -232,6 +235,10 @@ CELERY_BEAT_SCHEDULE = {
     "newsletter_draft": {
         "task": "apps.newsletter.tasks.create_weekly_draft",
         "schedule": crontab(day_of_week="fri", hour=6, minute=0),
+    },
+    "agent_review_queue_digest": {
+        "task": "apps.agent.tasks.send_review_queue_digest",
+        "schedule": crontab(hour=7, minute=30),
     },
 }
 
