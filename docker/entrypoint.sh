@@ -39,6 +39,11 @@ except Exception as e:
 echo "🔄 Running database migrations..."
 python manage.py migrate --noinput
 
+# Seed reference data (platforms, categories, capabilities) and demo apps.
+# Idempotent — safe to run on every container start.
+echo "🌱 Seeding reference data..."
+python manage.py seed_demo || echo "⚠️ Seed failed, continuing..."
+
 # Create superuser if it doesn't exist
 echo "👤 Creating superuser if needed..."
 python manage.py shell -c "

@@ -7,8 +7,10 @@ services:
       POSTGRES_PASSWORD: llmmarket
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Bind to localhost only — accessible to host psql, not to the LAN.
+    # Other services reach it as `postgres:5432` over the docker network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U llmmarket -d llmmarket"]
       interval: 10s
@@ -18,8 +20,11 @@ services:
 
   redis:
     image: redis:7
-    ports:
-      - "6379:6379"
+    # No host port — Redis is reachable only inside the docker network
+    # (web/worker/beat use `redis://redis:6379`). For host access run:
+    #   docker compose exec redis redis-cli
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
