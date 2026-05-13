@@ -11,10 +11,12 @@ Django bridge (``apps.agent.persist.build_taxonomy_snapshot``) and
 passed *in* to every pipeline call as a parameter. The pipeline never
 imports Django.
 
-Frozen + slug-tuples-not-lists is deliberate: the snapshot must be
-hashable (so multiple pipeline calls can compare or cache against the
-same taxonomy) and immutable inside the pipeline (the pipeline never
-mutates its inputs).
+Frozen + slug-tuples-not-lists keeps the immutable surface that
+matters: pipeline code cannot accidentally mutate its inputs.
+``capability_descriptions`` / ``category_descriptions`` are mappings
+(dict-backed), which makes the dataclass *not* hashable — that's
+intentional and not load-bearing; we want fast lookups, not set/dict
+keys.
 """
 from __future__ import annotations
 

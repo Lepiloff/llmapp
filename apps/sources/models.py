@@ -26,6 +26,7 @@ class Source(models.Model):
         SUBMISSION = "submission", "User submission"
         CHATGPT_DIRECTORY = "chatgpt_directory", "ChatGPT App Directory"
         CLAUDE_CONNECTORS = "claude_connectors", "Claude Connectors"
+        AGENT_ENRICH = "agent_enrich", "Agent enrichment"
 
     app = models.ForeignKey(
         "catalog.App", on_delete=models.CASCADE, related_name="sources"

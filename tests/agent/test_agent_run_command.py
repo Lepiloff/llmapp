@@ -30,6 +30,8 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def draft_app() -> App:
+    from apps.sources.models import Source
+
     Platform.objects.get_or_create(
         slug="mcp", defaults={"name": "MCP", "public_path": "mcp-servers"}
     )
@@ -41,6 +43,12 @@ def draft_app() -> App:
         status=App.AppStatus.DRAFT,
     )
     app.platforms.add(Platform.objects.get(slug="mcp"))
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id=f"mcp-registry:{app.slug}",
+        is_primary=True,
+    )
     return app
 
 
@@ -104,3 +112,22 @@ def test_unknown_slug_raises(patched_provider) -> None:
     from django.core.management.base import CommandError
     with pytest.raises(CommandError):
         call_command("agent_run", "--enrich-app=does-not-exist")
+
+
+def test_published_app_is_rejected_with_command_error(
+    draft_app, patched_provider
+) -> None:
+    """Phase 1 invariant: only DRAFT apps eligible. PUBLISHED → CommandError."""
+    from django.core.management.base import CommandError
+    App.objects.filter(pk=draft_app.pk).update(status=App.AppStatus.PUBLISHED)
+
+    with pytest.raises(CommandError, match="not eligible"):
+        call_command("agent_run", f"--enrich-app={draft_app.slug}", "--apply")
+
+    draft_app.refresh_from_db()
+    assert draft_app.status == App.AppStatus.PUBLISHED
+    assert draft_app.short_description == ""
+    # No audit Source row written (transaction never started).
+    assert not draft_app.sources.filter(
+        external_id=f"agent-enrich:{draft_app.pk}"
+    ).exists()

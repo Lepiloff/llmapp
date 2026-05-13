@@ -21,8 +21,10 @@ from django.utils import timezone
 from apps.agent.llm.client import LLMProvider, build_provider
 from apps.agent.models import AgentRun, EnrichmentTask
 from apps.agent.persist import (
+    AppNotEligibleError,
     PersistResult,
     apply_merge_set,
+    assert_app_is_eligible,
     build_app_snapshot,
     build_taxonomy_snapshot,
     pending_enrichment_app_ids,
@@ -54,6 +56,7 @@ def run_enrich_existing_draft(
     trigger: str = AgentRun.Trigger.MANUAL,
     triggered_by: str = "",
     run: AgentRun | None = None,
+    allow_non_mcp: bool = False,
 ) -> EnrichOutcome:
     """Enrich one DRAFT App. Phase 1 entry point.
 
@@ -85,6 +88,10 @@ def run_enrich_existing_draft(
     )
 
     try:
+        # Phase 1 invariant — fast-fail before spending LLM tokens on an
+        # ineligible target. The persist layer re-checks under a row lock.
+        assert_app_is_eligible(app_id, allow_non_mcp=allow_non_mcp)
+
         llm = llm or build_provider("primary")
         taxonomy = build_taxonomy_snapshot()
         snapshot = build_app_snapshot(app_id)
@@ -102,7 +109,7 @@ def run_enrich_existing_draft(
             persist = apply_merge_set(
                 app_id,
                 result,
-                source_type=Source.SourceType.MANUAL,
+                source_type=Source.SourceType.AGENT_ENRICH,
                 enrichment_task=task,
             )
             task.status = EnrichmentTask.Status.PERSISTED

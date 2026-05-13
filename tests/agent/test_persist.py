@@ -29,7 +29,9 @@ from apps.agent.llm.schemas import (
 from apps.agent.llm.client import MockLLMProvider
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.agent.persist import (
+    AppNotEligibleError,
     apply_merge_set,
+    assert_app_is_eligible,
     build_app_snapshot,
     build_taxonomy_snapshot,
 )
@@ -70,6 +72,14 @@ def taxonomy_rows():
 
 @pytest.fixture
 def draft_app(taxonomy_rows) -> App:
+    """A DRAFT App with an MCP_REGISTRY Source — the Phase 1 happy-path target.
+
+    Carrying the Source row in the fixture (instead of relying on
+    ``--allow-non-mcp``) means every test exercises the real production
+    eligibility path. The dedicated negative-path test
+    ``test_assert_app_is_eligible_rejects_non_mcp_draft`` covers the
+    case where no eligible source exists.
+    """
     app = App.objects.create(
         name="ExampleMCP",
         slug="examplemcp",
@@ -82,6 +92,12 @@ def draft_app(taxonomy_rows) -> App:
         pricing_model=App.PricingModel.UNKNOWN,
     )
     app.platforms.add(Platform.objects.get(slug="mcp"))
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id=f"mcp-registry:{app.slug}",
+        is_primary=True,
+    )
     return app
 
 
@@ -290,3 +306,354 @@ def test_apply_is_atomic_on_inner_failure(draft_app, monkeypatch) -> None:
     assert not AppCapability.objects.filter(
         app=draft_app, capability__key="open_source"
     ).exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 follow-up regressions (review High #1, #2, #3 + Low/Medium)
+# ---------------------------------------------------------------------------
+def test_assert_app_is_eligible_rejects_published(draft_app) -> None:
+    """``assert_app_is_eligible`` is the fast-fail before any LLM token spend."""
+    App.objects.filter(pk=draft_app.pk).update(status=App.AppStatus.PUBLISHED)
+    with pytest.raises(AppNotEligibleError) as excinfo:
+        assert_app_is_eligible(draft_app.pk)
+    assert excinfo.value.app_id == draft_app.pk
+    assert excinfo.value.status == App.AppStatus.PUBLISHED
+
+
+def test_assert_app_is_eligible_rejects_missing() -> None:
+    with pytest.raises(AppNotEligibleError):
+        assert_app_is_eligible(99999999)
+
+
+def test_assert_app_is_eligible_rejects_non_mcp_draft(taxonomy_rows) -> None:
+    """Phase 1 is strictly MCP-registry-sourced DRAFT cards.
+
+    A DRAFT manually entered by an editor (no Source, or Source of type
+    other than MCP_REGISTRY) must be rejected by the eligibility check.
+    """
+    app = App.objects.create(
+        name="ManuallyEntered",
+        slug="manual",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    # No Source row at all → ineligible.
+    with pytest.raises(AppNotEligibleError) as excinfo:
+        assert_app_is_eligible(app.pk)
+    assert "MCP Registry Source" in str(excinfo.value)
+    assert "--allow-non-mcp" in str(excinfo.value)
+
+    # Even a non-MCP Source (e.g. SUBMISSION) is still ineligible.
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.SUBMISSION,
+        external_id=f"submission:{app.pk}",
+    )
+    with pytest.raises(AppNotEligibleError):
+        assert_app_is_eligible(app.pk)
+
+
+def test_assert_app_is_eligible_allows_non_mcp_when_overridden(
+    taxonomy_rows,
+) -> None:
+    """``--allow-non-mcp`` (operator escape hatch) bypasses the source check."""
+    app = App.objects.create(
+        name="ManuallyEntered",
+        slug="manual-2",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    # Status still DRAFT — that's a hard requirement no override touches.
+    assert_app_is_eligible(app.pk, allow_non_mcp=True)
+
+
+def test_allow_non_mcp_override_still_requires_draft_status(
+    taxonomy_rows,
+) -> None:
+    """The override widens the source-type filter only, NOT the status guard.
+
+    PUBLISHED apps remain off-limits even with --allow-non-mcp.
+    """
+    app = App.objects.create(
+        name="Published",
+        slug="published",
+        short_description="x",
+        status=App.AppStatus.PUBLISHED,
+    )
+    with pytest.raises(AppNotEligibleError) as excinfo:
+        assert_app_is_eligible(app.pk, allow_non_mcp=True)
+    assert excinfo.value.status == App.AppStatus.PUBLISHED
+
+
+def test_pending_enrichment_app_ids_filters_by_mcp_source(
+    taxonomy_rows,
+) -> None:
+    """Selector returns only DRAFT apps with an MCP_REGISTRY Source.
+
+    Manual/submission DRAFT cards must NOT be picked up by batch.
+    """
+    from apps.agent.persist import pending_enrichment_app_ids
+
+    mcp_app = App.objects.create(
+        name="FromRegistry",
+        slug="mcp-app",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=mcp_app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp-registry:from-registry",
+    )
+
+    manual_app = App.objects.create(
+        name="ManualEntry",
+        slug="manual-3",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=manual_app,
+        source_type=Source.SourceType.MANUAL,
+        external_id="manual:from-editor",
+    )
+
+    pending = list(pending_enrichment_app_ids())
+    assert mcp_app.pk in pending
+    assert manual_app.pk not in pending
+
+
+def test_apply_merge_set_refuses_published_under_lock(draft_app) -> None:
+    """Defense-in-depth: even if the upstream guard is bypassed, the persist
+    layer must still refuse to write against a non-DRAFT row."""
+    # Build a valid result against the snapshot...
+    result = _run_pipeline(
+        draft_app,
+        MergeSet(
+            short_description="Should NOT land",
+            capabilities={
+                "open_source": CapabilityProposal(value="yes", evidence="GH")
+            },
+        ),
+    )
+    # ...then publish the App behind our back (simulating a race).
+    App.objects.filter(pk=draft_app.pk).update(status=App.AppStatus.PUBLISHED)
+
+    with pytest.raises(AppNotEligibleError):
+        apply_merge_set(draft_app.pk, result)
+
+    draft_app.refresh_from_db()
+    assert draft_app.status == App.AppStatus.PUBLISHED
+    assert draft_app.short_description == ""
+    # No audit Source row should exist either — the entire transaction
+    # rolled back.
+    assert not Source.objects.filter(
+        app=draft_app, external_id=f"agent-enrich:{draft_app.pk}"
+    ).exists()
+    assert not AppCapability.objects.filter(
+        app=draft_app, capability__key="open_source"
+    ).exists()
+
+
+def test_field_race_editor_wins_between_snapshot_and_apply(draft_app) -> None:
+    """The classic stale-snapshot scenario.
+
+    1. snapshot built with short_description=''
+    2. Pipeline returns plan including a field_update for short_description
+    3. *Editor writes the field via admin* — committed before our transaction
+    4. apply_merge_set must NOT overwrite the editor's value
+    """
+    result = _run_pipeline(
+        draft_app, MergeSet(short_description="Agent proposal that loses the race")
+    )
+    # Plan really does have the field update — guarantee the test is
+    # exercising the race, not a no-op plan.
+    assert any(
+        u.field == "short_description" for u in result.outcome.plan.field_updates
+    )
+
+    # Simulate editor write committed between snapshot build and apply.
+    App.objects.filter(pk=draft_app.pk).update(
+        short_description="Editor wrote this between snapshot and apply"
+    )
+
+    persisted = apply_merge_set(draft_app.pk, result)
+
+    draft_app.refresh_from_db()
+    assert (
+        draft_app.short_description
+        == "Editor wrote this between snapshot and apply"
+    ), "RACE: agent overwrote editor's freshly-committed value"
+    assert "short_description" not in persisted.fields_written
+
+
+def test_capability_race_editor_wins_between_snapshot_and_apply(draft_app) -> None:
+    """Same race scenario, capability side.
+
+    1. snapshot built with open_source=UNKNOWN
+    2. Pipeline returns plan with capability_update {open_source: yes}
+    3. Editor sets open_source=NO via admin before apply
+    4. apply_merge_set must NOT flip NO → YES
+    """
+    result = _run_pipeline(
+        draft_app,
+        MergeSet(
+            capabilities={
+                "open_source": CapabilityProposal(value="yes", evidence="GH README")
+            }
+        ),
+    )
+    assert any(
+        u.key == "open_source" for u in result.outcome.plan.capability_updates
+    )
+
+    # Editor's NO call lands before apply commits.
+    open_source = Capability.objects.get(key="open_source")
+    AppCapability.objects.create(
+        app=draft_app,
+        capability=open_source,
+        value=AppCapability.CapabilityValue.NO,
+    )
+
+    persisted = apply_merge_set(draft_app.pk, result)
+
+    cap = AppCapability.objects.get(app=draft_app, capability=open_source)
+    assert cap.value == AppCapability.CapabilityValue.NO, (
+        "RACE: agent flipped editor's NO to YES"
+    )
+    assert "open_source" not in persisted.capabilities_written
+
+
+def test_audit_source_uses_agent_enrich_source_type(draft_app) -> None:
+    """Distinguish agent provenance from manual entry (review Low/Medium)."""
+    result = _run_pipeline(draft_app, MergeSet(short_description="x"))
+    apply_merge_set(draft_app.pk, result)
+
+    src = Source.objects.get(
+        app=draft_app, external_id=f"agent-enrich:{draft_app.pk}"
+    )
+    assert src.source_type == Source.SourceType.AGENT_ENRICH
+
+
+def test_search_vector_refresh_is_scheduled_on_field_update(
+    draft_app, monkeypatch
+) -> None:
+    """``App.objects.update()`` skips post_save → search vector signal won't
+    fire. The persist layer must schedule the refresh manually."""
+    captured: list = []
+
+    # Capture every on_commit callback registered while applying.
+    real_on_commit = __import__(
+        "django.db.transaction", fromlist=["on_commit"]
+    ).on_commit
+
+    def capture_on_commit(callback, using=None, robust=False):
+        captured.append(callback)
+        return real_on_commit(callback, using=using, robust=robust)
+
+    monkeypatch.setattr(
+        "django.db.transaction.on_commit", capture_on_commit
+    )
+    # Also patch where it's bound inside persist.py.
+    from apps.agent import persist as persist_module
+    monkeypatch.setattr(persist_module.transaction, "on_commit", capture_on_commit)
+
+    # Stub the actual celery task so the captured callback doesn't try
+    # to hit the broker / DB rebuild in tests.
+    from apps.search import tasks as search_tasks
+    invoked: list[int] = []
+
+    def fake_delay(app_id):
+        invoked.append(app_id)
+
+    monkeypatch.setattr(search_tasks.refresh_search_vector_task, "delay", fake_delay)
+
+    result = _run_pipeline(draft_app, MergeSet(short_description="Filled by agent"))
+    apply_merge_set(draft_app.pk, result)
+
+    # At least one on_commit callback was scheduled.
+    assert len(captured) >= 1, "no search-vector refresh was scheduled"
+    # Manually run the captured callbacks (test transaction rolls back
+    # so the real on_commit hooks never fire).
+    for cb in captured:
+        cb()
+    assert draft_app.pk in invoked
+
+
+def test_no_field_updates_means_no_fields_written(draft_app) -> None:
+    """When the LLM proposes no field updates, ``PersistResult.fields_written``
+    is empty — the gate that decides whether the agent schedules its own
+    refresh.
+
+    (We don't assert on the underlying ``transaction.on_commit`` calls
+    directly: ``AppCapability.objects.create`` fires ``post_save``,
+    which independently schedules a refresh via the catalog signals.
+    That's correct behaviour, not the agent's responsibility.)
+    """
+    result = _run_pipeline(
+        draft_app,
+        MergeSet(
+            capabilities={
+                "open_source": CapabilityProposal(value="yes", evidence="GH README")
+            }
+        ),
+    )
+    persisted = apply_merge_set(draft_app.pk, result)
+    assert persisted.fields_written == []
+
+
+def test_search_refresh_scheduled_on_category_addition(
+    draft_app, monkeypatch
+) -> None:
+    """Adding a category through the agent path must trigger the
+    ``m2m_changed`` → ``_schedule_refresh`` → ``refresh_search_vector_task``
+    chain. The category name is part of ``App.search_index_text``, so a
+    missing refresh would silently drop the new category from search."""
+    from apps.catalog import signals as catalog_signals
+
+    refresh_calls: list[int] = []
+    real_schedule = catalog_signals._schedule_refresh
+
+    def capture(app_id: int) -> None:
+        refresh_calls.append(app_id)
+        real_schedule(app_id)
+
+    monkeypatch.setattr(catalog_signals, "_schedule_refresh", capture)
+
+    result = _run_pipeline(
+        draft_app,
+        MergeSet(
+            add_categories=[CategoryProposal(slug="developer-tools", confidence=0.99)]
+        ),
+    )
+    apply_merge_set(draft_app.pk, result)
+
+    # The signal handler binds to the module's _schedule_refresh by name
+    # at call time, so the monkeypatch is picked up. m2m_changed fires
+    # once per add() invocation.
+    assert draft_app.pk in refresh_calls
+
+
+def test_search_refresh_scheduled_on_use_case_addition(
+    draft_app, monkeypatch
+) -> None:
+    """Same invariant as categories: use_cases.add() must reach the
+    signal handler so the new use-case slug lands in ``search_index_text``."""
+    from apps.catalog import signals as catalog_signals
+
+    refresh_calls: list[int] = []
+    real_schedule = catalog_signals._schedule_refresh
+
+    def capture(app_id: int) -> None:
+        refresh_calls.append(app_id)
+        real_schedule(app_id)
+
+    monkeypatch.setattr(catalog_signals, "_schedule_refresh", capture)
+
+    result = _run_pipeline(
+        draft_app,
+        MergeSet(add_use_cases=["Turn notes into slides"]),
+    )
+    apply_merge_set(draft_app.pk, result)
+
+    assert draft_app.pk in refresh_calls

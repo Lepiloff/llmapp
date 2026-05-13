@@ -38,8 +38,6 @@ from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 from apps.catalog.models import (
     App,
     AppCapability,
-    AppCategory,
-    AppUseCase,
     Capability,
     Category,
     ListingType,
@@ -49,6 +47,86 @@ from apps.catalog.models import (
 from apps.sources.models import Source
 
 logger = logging.getLogger(__name__)
+
+
+class AppNotEligibleError(ValueError):
+    """Raised when the agent is asked to enrich an App that doesn't qualify.
+
+    Phase 1 invariant (docs/agent-pipeline.md): the agent only processes
+    DRAFT cards. PUBLISHED / HIDDEN apps are off-limits even via direct
+    slug. The guard fires *before* the LLM call (so we don't spend tokens
+    on an ineligible target) and *again* inside the persist transaction
+    (so a race that publishes the card between snapshot and apply still
+    cannot result in agent writes against an editorially-managed row).
+    """
+
+    def __init__(self, app_id: int, status: str, reason: str = "not DRAFT") -> None:
+        super().__init__(
+            f"App {app_id} is not eligible for agent enrichment "
+            f"(status={status!r}, reason={reason})"
+        )
+        self.app_id = app_id
+        self.status = status
+        self.reason = reason
+
+
+# Source types accepted by Phase 1 eligibility. Phase 3+ will extend this
+# tuple as discovery sources (RSS, GitHub, ChatGPT directory, ...) come
+# online; the explicit allowlist forces every new source to be considered
+# rather than silently letting any DRAFT through.
+_PHASE_1_ELIGIBLE_SOURCE_TYPES: tuple[str, ...] = (
+    Source.SourceType.MCP_REGISTRY,
+)
+
+
+# ---------------------------------------------------------------------------
+# Eligibility check — call BEFORE the LLM, raise loud on miss.
+# ---------------------------------------------------------------------------
+def assert_app_is_eligible(app_id: int, *, allow_non_mcp: bool = False) -> None:
+    """Pre-flight check used by ``tasks.run_enrich_existing_draft``.
+
+    Phase 1 invariants:
+
+    * ``App.status == DRAFT`` (no agent writes against published / hidden).
+    * App has a ``Source`` of type
+      :class:`apps.sources.models.Source.SourceType.MCP_REGISTRY`. This is
+      the strict reading of the Phase 1 scope from ``docs/agent-pipeline.md``
+      ("existing MCP DRAFT cards"). Phase 3+ will widen the allowlist as
+      discovery sources (RSS, GitHub, ...) come online.
+
+    ``allow_non_mcp`` is an explicit operator override for prompt
+    iteration against a card that isn't MCP-sourced — the ``--allow-non-mcp``
+    flag on the management command threads through to here. The override
+    intentionally cannot be set via env / settings; it must be re-typed
+    every run so no scheduled task can pick it up silently.
+
+    Cheap: one indexed PK read + one EXISTS subquery. Lets the
+    orchestrator fail fast before spending LLM tokens on an ineligible
+    target. The persist layer re-checks the status invariant under a
+    row lock.
+    """
+    try:
+        status = App.objects.values_list("status", flat=True).get(pk=app_id)
+    except App.DoesNotExist as exc:
+        raise AppNotEligibleError(app_id, "missing", "no such App") from exc
+    if status != App.AppStatus.DRAFT:
+        raise AppNotEligibleError(app_id, status)
+
+    if allow_non_mcp:
+        return
+
+    has_eligible_source = Source.objects.filter(
+        app_id=app_id, source_type__in=_PHASE_1_ELIGIBLE_SOURCE_TYPES
+    ).exists()
+    if not has_eligible_source:
+        raise AppNotEligibleError(
+            app_id,
+            status,
+            reason=(
+                "Phase 1 only enriches apps with an MCP Registry Source. "
+                "Pass --allow-non-mcp to override for prompt iteration."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +237,30 @@ def apply_merge_set(
     app_id: int,
     result: EnrichmentResult,
     *,
-    source_type: str = Source.SourceType.MANUAL,
+    source_type: str = Source.SourceType.AGENT_ENRICH,
     enrichment_task: EnrichmentTask | None = None,
 ) -> PersistResult:
     """Apply ``result.outcome.plan`` and queue ``result.outcome.queue``.
 
-    Wraps everything in a single transaction; on any exception, nothing
-    is written. Returns a structured summary so the management command
-    can print a human-readable diff.
+    Race-safe by construction:
+
+    * Locks the ``App`` row with ``SELECT ... FOR UPDATE`` at the top of
+      the transaction. Concurrent editor edits that committed *before*
+      this transaction are visible inside the lock; concurrent edits
+      from after this transaction starts are blocked until commit.
+    * Field updates are conditional: only applied if the CURRENT (locked)
+      value is still empty. If the editor filled the field between
+      ``build_app_snapshot()`` and now, the merge plan is dropped on
+      the floor for that field. The original LLM proposal is still
+      available in ``Source.payload`` (audit trail).
+    * Capability updates are conditional: only applied when the current
+      ``AppCapability.value`` is still ``unknown``. Existing yes/no
+      values are never overwritten under any circumstance.
+    * Status guard re-checked under the lock — defends against a race
+      where ``App.status`` was published between ``assert_app_is_eligible``
+      and now.
+
+    On any exception, the whole transaction rolls back (atomic).
     """
     outcome = result.outcome
     plan = outcome.plan
@@ -175,7 +269,16 @@ def apply_merge_set(
     _assert_plan_does_not_touch_forbidden(plan)
 
     with transaction.atomic():
-        fields_written = _apply_field_updates(app_id, plan)
+        locked_app = App.objects.select_for_update().get(pk=app_id)
+
+        if locked_app.status != App.AppStatus.DRAFT:
+            raise AppNotEligibleError(
+                app_id,
+                locked_app.status,
+                "status changed between snapshot and apply",
+            )
+
+        fields_written = _apply_field_updates(locked_app, plan)
         capabilities_written = _apply_capability_updates(app_id, plan)
         categories_added = _apply_categories(app_id, plan)
         listing_types_added = _apply_listing_types(app_id, plan)
@@ -213,23 +316,81 @@ def _assert_plan_does_not_touch_forbidden(plan: Plan) -> None:
         )
 
 
-def _apply_field_updates(app_id: int, plan: Plan) -> list[str]:
+def _apply_field_updates(locked_app: App, plan: Plan) -> list[str]:
+    """Apply text-field updates, race-checked against the locked row.
+
+    Caller must hold the ``SELECT ... FOR UPDATE`` lock on ``locked_app``
+    (i.e. be inside ``apply_merge_set``'s atomic block). Any field whose
+    current value is non-empty is skipped on the floor — the LLM proposal
+    is preserved in ``Source.payload`` as audit trail.
+
+    Because ``.update()`` bypasses ``post_save``, the search-vector
+    refresh signal in ``apps.catalog.signals`` won't fire on its own.
+    We schedule the refresh manually via ``transaction.on_commit`` so
+    a rolled-back transaction doesn't try to refresh anything.
+    """
     if not plan.field_updates:
         return []
-    updates = {u.field: u.new_value for u in plan.field_updates}
-    App.objects.filter(pk=app_id).update(**updates)
-    return list(updates.keys())
+
+    applicable: dict[str, str] = {}
+    for upd in plan.field_updates:
+        current = (getattr(locked_app, upd.field) or "").strip()
+        if current:
+            # Race: editor filled this between snapshot and apply, or the
+            # snapshot was stale to begin with. Skip — never overwrite.
+            logger.info(
+                "agent_skip_field_race",
+                extra={"app_id": locked_app.pk, "field": upd.field},
+            )
+            continue
+        applicable[upd.field] = upd.new_value
+
+    if not applicable:
+        return []
+
+    App.objects.filter(pk=locked_app.pk).update(**applicable)
+
+    # post_save doesn't fire for .update(); schedule search-vector refresh
+    # explicitly. Mirrors apps.catalog.signals._schedule_refresh.
+    app_id = locked_app.pk
+
+    def _schedule_search_refresh() -> None:
+        from apps.search.tasks import refresh_search_vector_task
+
+        refresh_search_vector_task.delay(app_id)
+
+    transaction.on_commit(_schedule_search_refresh)
+
+    return list(applicable.keys())
 
 
 def _apply_capability_updates(app_id: int, plan: Plan) -> list[str]:
+    """Apply capability updates, race-checked against locked AppCapability rows.
+
+    For every ``CapabilityUpdate`` in the plan we ``SELECT ... FOR UPDATE``
+    the matching ``AppCapability`` row (if it exists) and apply only when
+    the current value is ``unknown``. Existing ``yes`` / ``no`` is *never*
+    overwritten — the disagreement was already routed to
+    ``NeedsReviewQueueEntry`` by ``compute_merge``; the persist layer's
+    job here is only to make the read-modify-write cycle race-safe.
+    """
     if not plan.capability_updates:
         return []
-    key_to_obj = {c.key: c for c in Capability.objects.filter(
-        key__in=[u.key for u in plan.capability_updates]
-    )}
+
+    keys = [u.key for u in plan.capability_updates]
+    cap_objects = {c.key: c for c in Capability.objects.filter(key__in=keys)}
+
+    # Lock existing AppCapability rows under the same transaction.
+    existing_rows = {
+        ac.capability_id: ac
+        for ac in AppCapability.objects.select_for_update().filter(
+            app_id=app_id, capability__key__in=keys
+        )
+    }
+
     applied: list[str] = []
     for upd in plan.capability_updates:
-        cap_obj = key_to_obj.get(upd.key)
+        cap_obj = cap_objects.get(upd.key)
         if cap_obj is None:
             # Validator should have stripped this, but guard anyway.
             logger.warning(
@@ -237,30 +398,63 @@ def _apply_capability_updates(app_id: int, plan: Plan) -> list[str]:
                 extra={"app_id": app_id, "capability_key": upd.key},
             )
             continue
-        AppCapability.objects.update_or_create(
-            app_id=app_id,
-            capability=cap_obj,
-            defaults={
-                "value": upd.value,
-                "note": (upd.evidence or "")[:200],
-            },
-        )
+
+        existing_row = existing_rows.get(cap_obj.pk)
+        if existing_row is not None:
+            if existing_row.value != AppCapability.CapabilityValue.UNKNOWN:
+                # Race: someone (editor or another transaction that
+                # committed first) flipped the slot to a known value
+                # since the snapshot was built. Never overwrite known
+                # values; the disagreement is captured in the queue.
+                logger.info(
+                    "agent_skip_capability_race",
+                    extra={
+                        "app_id": app_id,
+                        "capability_key": upd.key,
+                        "existing_value": existing_row.value,
+                    },
+                )
+                continue
+            existing_row.value = upd.value
+            existing_row.note = (upd.evidence or "")[:200]
+            existing_row.save(update_fields=["value", "note"])
+        else:
+            AppCapability.objects.create(
+                app_id=app_id,
+                capability=cap_obj,
+                value=upd.value,
+                note=(upd.evidence or "")[:200],
+            )
         applied.append(upd.key)
     return applied
 
 
 def _apply_categories(app_id: int, plan: Plan) -> list[str]:
+    """Add categories through the M2M manager so ``m2m_changed`` fires.
+
+    Writing directly to the through-model via
+    ``AppCategory.objects.get_or_create`` would bypass the
+    ``m2m_changed`` signal that
+    :mod:`apps.catalog.signals` uses to keep ``App.search_vector`` warm —
+    the new category text would not be searchable until the nightly
+    safety-net rebuild. Routing through ``app.categories.add()`` keeps
+    the signal pipeline intact.
+
+    ``through_defaults`` is not needed: ``AppCategory.is_primary``
+    defaults to ``False``, and Django uses that default when ``add()``
+    creates a through-row.
+    """
     if not plan.add_categories:
         return []
     cats = list(Category.objects.filter(slug__in=plan.add_categories))
-    added: list[str] = []
-    for cat in cats:
-        _, created = AppCategory.objects.get_or_create(
-            app_id=app_id, category=cat
-        )
-        if created:
-            added.append(cat.slug)
-    return added
+    if not cats:
+        return []
+    app = App.objects.get(pk=app_id)
+    existing = set(app.categories.values_list("slug", flat=True))
+    to_add = [c for c in cats if c.slug not in existing]
+    if to_add:
+        app.categories.add(*to_add)
+    return [c.slug for c in to_add]
 
 
 def _apply_listing_types(app_id: int, plan: Plan) -> list[str]:
@@ -278,20 +472,30 @@ def _apply_listing_types(app_id: int, plan: Plan) -> list[str]:
 
 
 def _apply_use_cases(app_id: int, plan: Plan) -> list[str]:
+    """Add use-cases through the M2M manager (see ``_apply_categories``).
+
+    Same rationale: routing through ``app.use_cases.add()`` fires
+    ``m2m_changed`` on ``App.use_cases.through``, which schedules the
+    search-vector refresh via :mod:`apps.catalog.signals`.
+    """
     if not plan.add_use_cases:
         return []
-    added: list[str] = []
+    app = App.objects.get(pk=app_id)
+    existing = set(app.use_cases.values_list("slug", flat=True))
+    added_use_cases: list[UseCase] = []
+    added_slugs: list[str] = []
     for title in plan.add_use_cases:
         slug = slugify(title)[:200] or "use-case"
+        if slug in existing:
+            continue
         use_case, _ = UseCase.objects.get_or_create(
             slug=slug, defaults={"title": title}
         )
-        _, created = AppUseCase.objects.get_or_create(
-            app_id=app_id, use_case=use_case
-        )
-        if created:
-            added.append(slug)
-    return added
+        added_use_cases.append(use_case)
+        added_slugs.append(slug)
+    if added_use_cases:
+        app.use_cases.add(*added_use_cases)
+    return added_slugs
 
 
 def _upsert_agent_source(
@@ -366,15 +570,26 @@ def record_llm_call(task: EnrichmentTask, meta) -> LLMCallLog:
 
 
 def pending_enrichment_app_ids(limit: int | None = None) -> Iterable[int]:
-    """Apps eligible for ``enrich_existing_draft``: DRAFT, with at least one
-    Source that hasn't been agent-enriched yet (no Source.external_id matching
-    ``agent-enrich:*``).
+    """Phase 1 batch selector.
 
-    Used by ``enrich_pending_drafts_batch`` (Phase 1) and by the
-    management command's ``--enrich-pending`` flag.
+    Returns app PKs eligible for ``enrich_existing_draft``:
+
+    * ``status == DRAFT`` — agent never touches published / hidden cards.
+    * Has a ``Source`` row with ``source_type`` in
+      ``_PHASE_1_ELIGIBLE_SOURCE_TYPES`` (currently only
+      ``MCP_REGISTRY``). DRAFT cards from manual entry or submissions
+      are out of scope until later phases.
+    * Has not yet been agent-enriched (no ``Source.external_id``
+      starting with ``agent-enrich:``).
+
+    Used by ``enrich_pending_drafts_batch`` and by the management
+    command's ``--enrich-pending`` flag.
     """
     qs = (
-        App.objects.filter(status=App.AppStatus.DRAFT)
+        App.objects.filter(
+            status=App.AppStatus.DRAFT,
+            sources__source_type__in=_PHASE_1_ELIGIBLE_SOURCE_TYPES,
+        )
         .exclude(
             sources__external_id__startswith="agent-enrich:",
         )

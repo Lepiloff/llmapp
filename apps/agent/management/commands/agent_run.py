@@ -3,18 +3,26 @@
 Phase 1 supports two modes:
 
 * ``--enrich-app=<slug>`` — process one specific App. Useful for
-  iterating on prompts against a known card.
+  iterating on prompts against a known card. The target App must have
+  ``status='draft'``; otherwise the command errors out (Phase 1
+  invariant — see ``apps.agent.persist.assert_app_is_eligible``).
 * ``--enrich-pending [--limit N]`` — walk the same selector beat
   would: DRAFT cards not yet agent-enriched, newest first.
 
-``--dry-run`` is the safe default during Phase 1: pipeline runs end to
-end and writes ``AgentRun`` / ``EnrichmentTask`` / ``LLMCallLog`` /
-``Source.payload`` snapshots, but skips the ``apply_merge_set`` step
-that would touch ``App`` / ``AppCapability`` / ``AppCategory``.
+Default is **dry-run**: the pipeline runs end-to-end (prompt → LLM →
+validate → merge) and writes the audit trail —
+``AgentRun`` / ``EnrichmentTask`` / ``LLMCallLog`` rows, with the full
+merge proposal serialized into ``EnrichmentTask.diff_summary``.
 
-A summary of what *would have* been written is printed to stdout in
-both modes — that's the operator's eyes-on diff before flipping the
-flag.
+Dry-run does **NOT** call ``apply_merge_set``, which means:
+  * No ``App`` / ``AppCapability`` / ``AppCategory`` writes.
+  * **No ``Source`` row created** — the ``agent-enrich:<id>`` Source
+    is only written when ``--apply`` runs.
+
+Pass ``--apply`` to land the proposal in the catalog. A summary of
+what *would have been* (dry-run) / *was* (apply) written is printed
+to stdout in either mode — that's the operator's eyes-on diff before
+flipping the flag.
 """
 from __future__ import annotations
 
@@ -23,7 +31,7 @@ import json
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.agent.models import EnrichmentTask
-from apps.agent.persist import pending_enrichment_app_ids
+from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
 from apps.agent.tasks import run_enrich_existing_draft
 from apps.catalog.models import App
 
@@ -63,21 +71,39 @@ class Command(BaseCommand):
                 "Default is dry-run."
             ),
         )
+        parser.add_argument(
+            "--allow-non-mcp",
+            dest="allow_non_mcp",
+            action="store_true",
+            help=(
+                "Skip the Phase 1 MCP-source eligibility check on the "
+                "target App. Use ONLY for prompt iteration against a "
+                "non-MCP DRAFT; never wire this into beat / batch."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         dry_run = not options["apply"]
+        allow_non_mcp = options["allow_non_mcp"]
         if options.get("enrich_app"):
             app_ids = [self._resolve_slug(options["enrich_app"])]
         else:
+            # --enrich-pending always uses the strict Phase 1 selector.
+            # --allow-non-mcp has no effect in batch mode (by design —
+            # would mask source-type bugs at scale).
             app_ids = list(pending_enrichment_app_ids(limit=options["limit"]))
+            allow_non_mcp = False
             if not app_ids:
                 self.stdout.write(self.style.NOTICE(
-                    "No pending DRAFT cards to enrich — nothing to do."
+                    "No pending MCP-source DRAFT cards to enrich — "
+                    "nothing to do."
                 ))
                 return
 
         for app_id in app_ids:
-            self._process_one(app_id, dry_run=dry_run)
+            self._process_one(
+                app_id, dry_run=dry_run, allow_non_mcp=allow_non_mcp
+            )
 
     # ------------------------------------------------------------------
     def _resolve_slug(self, slug: str) -> int:
@@ -86,13 +112,23 @@ class Command(BaseCommand):
         except App.DoesNotExist as exc:
             raise CommandError(f"No App with slug={slug!r}") from exc
 
-    def _process_one(self, app_id: int, *, dry_run: bool) -> None:
-        outcome = run_enrich_existing_draft(
-            app_id,
-            dry_run=dry_run,
-            trigger="manual",
-            triggered_by="agent_run",
-        )
+    def _process_one(
+        self, app_id: int, *, dry_run: bool, allow_non_mcp: bool
+    ) -> None:
+        try:
+            outcome = run_enrich_existing_draft(
+                app_id,
+                dry_run=dry_run,
+                trigger="manual",
+                triggered_by="agent_run",
+                allow_non_mcp=allow_non_mcp,
+            )
+        except AppNotEligibleError as exc:
+            # Convert to CommandError so the operator sees a clean message
+            # instead of a stack trace. The AgentRun/EnrichmentTask rows
+            # the orchestrator created before the failure carry the audit
+            # trail (status=FAILED).
+            raise CommandError(str(exc)) from exc
         plan = outcome.result.outcome.plan.as_dict()
         queue = outcome.result.outcome.queue.as_dict()
         applied = outcome.persist.as_dict() if outcome.persist else None

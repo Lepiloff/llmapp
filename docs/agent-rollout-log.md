@@ -274,3 +274,150 @@ Breakdown:
   Phase 1b + live editor review and are scheduled accordingly.
 
 **Phase 1 part-1 complete. Gate to Phase 1b (real LLM providers): OPEN.**
+
+---
+
+## Phase 1 — Follow-up hardening (post-review, 2026-05-13)
+
+External reviewer flagged that the persist layer trusted the pure
+merge result too much. Fixed in this pass.
+
+### High #1 — DRAFT-only status guard
+
+Before this fix, `--enrich-app=<slug>` and the Celery task
+`enrich_existing_draft_task(app_id)` accepted any App by id/slug;
+`run_enrich_existing_draft` applied the merge without checking
+`App.status`. This could (silently) mutate PUBLISHED cards in
+violation of the Phase 0 → Phase 1 gate criterion #4
+("0 published apps touched").
+
+Fix:
+
+* `apps/agent/persist.py::AppNotEligibleError` (new) — typed
+  exception with `app_id` / `status` / `reason` attrs.
+* `apps/agent/persist.py::assert_app_is_eligible(app_id)` — cheap
+  pre-flight (single indexed PK read). Called by
+  `tasks.run_enrich_existing_draft` *before* the LLM call so we
+  never spend tokens on an ineligible target.
+* `apply_merge_set` re-checks `App.status == DRAFT` *under the row
+  lock*, defending against a race where the status changes between
+  the pre-flight and the apply.
+* `apps/agent/management/commands/agent_run.py` catches
+  `AppNotEligibleError` and surfaces it as `CommandError` — operator
+  sees a clean message, not a stack trace.
+
+Tests: `test_assert_app_is_eligible_rejects_published`,
+`test_assert_app_is_eligible_rejects_missing`,
+`test_apply_merge_set_refuses_published_under_lock` (race scenario),
+`test_published_app_is_rejected_with_command_error`.
+
+### High #2 — Race-safe persist (stale snapshots)
+
+`compute_merge` was conservative against the snapshot at pipeline
+input time, but `apply_merge_set` then executed the precomputed plan
+blindly — an editor edit committed between `build_app_snapshot()` and
+`apply_merge_set()` would be silently overwritten.
+
+Fix:
+
+* `apply_merge_set` opens its atomic block with
+  `App.objects.select_for_update().get(pk=app_id)`. The locked row's
+  current values are the source of truth from here on.
+* `_apply_field_updates(locked_app, plan)` re-checks every field
+  update against `locked_app.<field>` and drops the update if the
+  current value is non-empty. The LLM proposal remains preserved in
+  `Source.payload` (audit trail).
+* `_apply_capability_updates(app_id, plan)` fetches existing
+  `AppCapability` rows under `SELECT ... FOR UPDATE` and applies
+  only when the current value is `unknown`. Existing `yes` / `no`
+  is *never* flipped under any circumstance.
+
+Tests:
+* `test_field_race_editor_wins_between_snapshot_and_apply` —
+  simulates editor write to `App.short_description` between snapshot
+  and apply; asserts the editor's value survives.
+* `test_capability_race_editor_wins_between_snapshot_and_apply` —
+  same shape for `AppCapability.open_source` flipped to NO
+  pre-apply; agent's YES must lose.
+
+### High #3 — Search vector stays warm after field-only enrichment
+
+`App.objects.update(**fields)` does not fire `post_save`, so the
+signal-based `refresh_search_vector_task` in `apps/catalog/signals.py`
+never gets enqueued on text-only fills. Search would not see the new
+`short_description` / `long_description` / `developer_name` /
+`developer_url` until the nightly safety-net rebuild.
+
+Fix:
+
+* `_apply_field_updates` schedules
+  `refresh_search_vector_task.delay(app_id)` via
+  `transaction.on_commit` whenever the function actually wrote
+  fields. Mirrors the pattern in `apps/catalog/signals._schedule_refresh`.
+* On rollback the callback is discarded (the whole point of
+  `on_commit`); no stale refreshes triggered.
+
+Tests:
+* `test_search_vector_refresh_is_scheduled_on_field_update`
+  monkeypatches `transaction.on_commit` to capture callbacks and
+  stubs `refresh_search_vector_task.delay`; asserts a callback was
+  scheduled that, when invoked, calls `.delay(app_id)`.
+* `test_no_field_updates_means_no_fields_written` confirms the
+  invariant that gates the refresh (capability-only / category-only
+  merges report `fields_written == []`).
+
+### Medium #1 — Dry-run documentation
+
+`apps/agent/management/commands/agent_run.py` docstring claimed
+dry-run wrote `Source.payload` snapshots, but `_upsert_agent_source`
+is called from `apply_merge_set` only — never during dry-run.
+
+Fix: docstring rewritten to match reality. Dry-run writes
+`AgentRun` / `EnrichmentTask` / `LLMCallLog` (full proposal in
+`EnrichmentTask.diff_summary`) but no `Source` row. The
+`agent-enrich:<id>` Source is only created on `--apply`.
+
+### Medium #2 — TaxonomySnapshot hashability claim
+
+The dataclass docstring claimed hashability as a benefit; the dict
+fields (`capability_descriptions`, `category_descriptions`) make it
+non-hashable. Fix: docstring rewritten to drop the hashability
+claim — we want fast dict lookups, not set/dict keys.
+
+### Low/Medium — Distinct provenance for agent Sources
+
+Agent-generated audit `Source` rows were stored with
+`source_type=manual`, indistinguishable from manual entry except by
+the `external_id` prefix `agent-enrich:`. Fixed before this becomes
+load-bearing in analytics / admin filters.
+
+Fix:
+
+* `apps/sources/models.py::Source.SourceType.AGENT_ENRICH = "agent_enrich"`.
+* `apps/sources/migrations/0003_alter_source_source_type.py` —
+  Django auto-migration (choices-only change, no DB-level schema
+  change).
+* `apply_merge_set` default `source_type` changed from `MANUAL` to
+  `AGENT_ENRICH`; `tasks.run_enrich_existing_draft` updated to match.
+
+Test: `test_audit_source_uses_agent_enrich_source_type`.
+
+### Test totals
+
+```
+pytest tests/ → 84 passed
+```
+
+| Suite | Tests | Δ from part-1 |
+|---|---|---|
+| `tests/sources/*` (Phase 0) | 18 | — |
+| `tests/agent/test_schemas.py` | 10 | — |
+| `tests/agent/test_taxonomy.py` | 3 | — |
+| `tests/agent/test_validate.py` | 9 | — |
+| `tests/agent/test_merge.py` | 17 | — |
+| `tests/agent/test_enrich.py` | 5 | — |
+| `tests/agent/test_persist.py` | 17 | +7 |
+| `tests/agent/test_agent_run_command.py` | 4 | +1 |
+
+**Phase 1 hardened. Persist layer is now the final safety boundary
+the reviewer asked for. Gate to Phase 1b (real LLM providers): OPEN.**
