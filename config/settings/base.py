@@ -320,6 +320,12 @@ AGENT_LLM_MODEL_PRIMARY = config("AGENT_LLM_MODEL_PRIMARY", default="")
 AGENT_LLM_MODEL_CHEAP = config("AGENT_LLM_MODEL_CHEAP", default="")
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
+AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
 
 # Budget cap (hard stop at 100%, alert at 80%). Empty = no budget enforcement
 # (acceptable only during Phase 1 mock-only mode); must be set before any

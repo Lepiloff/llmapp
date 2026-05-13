@@ -41,9 +41,9 @@ def _check_pg_trgm() -> bool:
     """
     try:
         with connection.cursor() as cur:
-            cur.execute("SELECT 'a' %% 'a'")
-            cur.fetchone()
-        return True
+            cur.execute("SELECT similarity('a'::text, 'a'::text)")
+            row = cur.fetchone()
+            return bool(row and row[0] == 1)
     except Exception:  # pragma: no cover - infra failure
         logger.exception("healthcheck_pg_trgm_failed")
         return False

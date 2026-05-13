@@ -421,3 +421,50 @@ pytest tests/ → 84 passed
 
 **Phase 1 hardened. Persist layer is now the final safety boundary
 the reviewer asked for. Gate to Phase 1b (real LLM providers): OPEN.**
+
+---
+
+## Phase 1b — OpenAI real provider + production-like smoke (2026-05-13)
+
+### Shipped
+
+* `apps/agent/llm/client.py::OpenAIProvider` implemented against the
+  official OpenAI SDK using Pydantic structured outputs.
+* Provider-specific OpenAI wire schema added for `MergeSet` so strict
+  structured outputs can accept the request while the internal pipeline
+  continues to consume the existing ergonomic `MergeSet` contract.
+* `LLMCallMetadata` is populated from provider usage: input/output
+  tokens, cached tokens, latency, `is_mock=False`, and optional cost
+  using `AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS` /
+  `AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS`.
+* Real-provider failure messages are sanitized before bubbling into
+  task/audit logs (status/code only; no raw SDK message carrying key
+  fragments).
+* Docker image now installs `openai>=1.50,<2.0`; `web`, `worker`, and
+  `beat` were rebuilt/restarted after `.env` switched to OpenAI.
+* `/health/` pg_trgm check fixed: it now calls
+  `similarity('a'::text, 'a'::text)` instead of the invalid `%%`
+  literal operator. Container health is green.
+
+### Verification
+
+* Real OpenAI smoke call returned HTTP 200 and parsed `MergeSet`
+  (`provider=openai`, `is_mock=False`).
+* `curl http://localhost:8000/health/`:
+
+  ```
+  {"status": "ok", "checks": {"db": true, "redis": true, "pg_trgm": true}}
+  ```
+
+* Focused local tests:
+
+  ```
+  pytest tests/core/test_healthcheck.py tests/agent/test_llm_client.py \
+    tests/agent/test_enrich.py tests/agent/test_validate.py \
+    tests/agent/test_merge.py tests/agent/test_schemas.py
+  → 51 passed
+  ```
+
+**Phase 1 is complete. Discovery, batch automation, and editor review
+acceptance-rate measurement remain Phase 2+ gates; `AGENT_SOURCES_ENABLED`
+stays empty.**

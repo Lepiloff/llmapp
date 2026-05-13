@@ -20,7 +20,7 @@ COPY pyproject.toml /app/
 RUN pip install --upgrade pip && \
     pip install "Django>=5.0,<6.0" "psycopg[binary]>=3.1,<4.0" python-decouple dj-database-url \
     "celery>=5.3,<6.0" django-celery-beat redis django-redis requests python-Levenshtein django-ratelimit \
-    django-cors-headers sentry-sdk python-json-logger gunicorn Pillow
+    django-cors-headers sentry-sdk python-json-logger gunicorn Pillow "openai>=1.50,<2.0"
 
 # Copy application code
 COPY . /app/

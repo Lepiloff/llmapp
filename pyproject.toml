@@ -29,6 +29,7 @@ dependencies = [
 
   # LLM-pipeline (Phase 1+) — real provider SDKs added when LLM is wired
   "pydantic>=2.5,<3.0",
+  "openai>=1.50,<2.0",
 
   # Other
   "gunicorn>=22.0",
