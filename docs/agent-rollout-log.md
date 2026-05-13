@@ -636,3 +636,23 @@ DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
   .venv/bin/pytest tests/ -q
 → 121 passed
 ```
+
+### Slice 3 — Manual discovery CLI (2026-05-13)
+
+* `manage.py agent_run --source=rss --limit=N` added.
+* `manage.py agent_run --source=github_mcp --limit=N` added.
+* Default remains dry-run. Passing `--apply` delegates to the same
+  discovery tasks beat uses, so non-dry-run source execution is still
+  guarded by `AGENT_SOURCES_ENABLED`.
+
+Focused tests:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_agent_run_command.py -v
+→ 6 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 123 passed
+```

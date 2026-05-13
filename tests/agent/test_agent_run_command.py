@@ -131,3 +131,49 @@ def test_published_app_is_rejected_with_command_error(
     assert not draft_app.sources.filter(
         external_id=f"agent-enrich:{draft_app.pk}"
     ).exists()
+
+
+def test_source_rss_invokes_discovery_task(monkeypatch) -> None:
+    from apps.agent.management.commands import agent_run
+
+    called = {}
+
+    def fake_discover_rss(*, limit: int, dry_run: bool):
+        called["limit"] = limit
+        called["dry_run"] = dry_run
+        return {"seen": 2, "relevant": 1}
+
+    monkeypatch.setattr(agent_run, "discover_rss", fake_discover_rss)
+    out = StringIO()
+
+    call_command("agent_run", "--source=rss", "--limit=2", stdout=out)
+
+    assert called == {"limit": 2, "dry_run": True}
+    assert "[DRY-RUN] source=rss" in out.getvalue()
+    assert '"relevant": 1' in out.getvalue()
+
+
+def test_source_github_apply_invokes_discovery_task(monkeypatch) -> None:
+    from apps.agent.management.commands import agent_run
+
+    called = {}
+
+    def fake_discover_github_mcp(*, limit: int, dry_run: bool):
+        called["limit"] = limit
+        called["dry_run"] = dry_run
+        return {"seen": 1, "persisted": 1}
+
+    monkeypatch.setattr(agent_run, "discover_github_mcp", fake_discover_github_mcp)
+    out = StringIO()
+
+    call_command(
+        "agent_run",
+        "--source=github_mcp",
+        "--limit=1",
+        "--apply",
+        stdout=out,
+    )
+
+    assert called == {"limit": 1, "dry_run": False}
+    assert "[APPLIED] source=github_mcp" in out.getvalue()
+    assert '"persisted": 1' in out.getvalue()

@@ -1,6 +1,6 @@
 """Manual entry point for the LLM-pipeline agent.
 
-Phase 1 supports two modes:
+Supported modes:
 
 * ``--enrich-app=<slug>`` — process one specific App. Useful for
   iterating on prompts against a known card. The target App must have
@@ -8,6 +8,9 @@ Phase 1 supports two modes:
   invariant — see ``apps.agent.persist.assert_app_is_eligible``).
 * ``--enrich-pending [--limit N]`` — walk the same selector beat
   would: DRAFT cards not yet agent-enriched, newest first.
+* ``--source=rss|github_mcp [--limit N]`` — run Phase 3 discovery
+  manually. Dry-run bypasses `AGENT_SOURCES_ENABLED`; `--apply` uses the
+  same feature-flag guard as beat.
 
 Default is **dry-run**: the pipeline runs end-to-end (prompt → LLM →
 validate → merge) and writes the audit trail —
@@ -32,7 +35,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.agent.models import EnrichmentTask
 from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
-from apps.agent.tasks import run_enrich_existing_draft
+from apps.agent.tasks import discover_github_mcp, discover_rss, run_enrich_existing_draft
 from apps.catalog.models import App
 
 
@@ -55,6 +58,11 @@ class Command(BaseCommand):
             dest="enrich_pending",
             action="store_true",
             help="Walk pending DRAFT cards not yet agent-enriched.",
+        )
+        target.add_argument(
+            "--source",
+            choices=("rss", "github_mcp"),
+            help="Run a Phase 3 discovery source manually.",
         )
         parser.add_argument(
             "--limit",
@@ -85,6 +93,19 @@ class Command(BaseCommand):
     def handle(self, *args, **options) -> None:
         dry_run = not options["apply"]
         allow_non_mcp = options["allow_non_mcp"]
+        if options.get("source"):
+            result = self._run_source(
+                options["source"],
+                limit=options["limit"],
+                dry_run=dry_run,
+            )
+            header = "[DRY-RUN]" if dry_run else "[APPLIED]"
+            self.stdout.write(self.style.SUCCESS(
+                f"{header} source={options['source']}"
+            ))
+            self.stdout.write("  result:  " + json.dumps(result, ensure_ascii=False))
+            return
+
         if options.get("enrich_app"):
             app_ids = [self._resolve_slug(options["enrich_app"])]
         else:
@@ -147,3 +168,10 @@ class Command(BaseCommand):
         # where a hypothetical future change accidentally calls
         # apply_merge_set inside dry-run.
         EnrichmentTask.objects.filter(pk=outcome.task_id).get()  # raises if not found
+
+    def _run_source(self, source: str, *, limit: int, dry_run: bool) -> dict:
+        if source == "rss":
+            return discover_rss(limit=limit, dry_run=dry_run)
+        if source == "github_mcp":
+            return discover_github_mcp(limit=limit, dry_run=dry_run)
+        raise CommandError(f"Unsupported source={source!r}")
