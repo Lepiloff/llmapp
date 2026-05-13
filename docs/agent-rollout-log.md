@@ -529,3 +529,65 @@ New coverage in `tests/agent/test_admin_review_queue.py`:
 operational, not code: after real editors review at least 10 LLM proposals,
 run `review_acceptance_stats(days=30)` and record whether acceptance rate
 is ≥ 60% before scaling discovery.
+
+---
+
+## Phase 3 — Discovery RSS + GitHub, safe first slice (2026-05-13)
+
+### Shipped
+
+* `apps.agent.sources.rss_feeds` parses RSS 2.0 and Atom feeds into
+  normalized `DiscoveryCandidate` records using the standard library.
+* `apps.agent.sources.github_mcp_search` wraps GitHub repository search
+  and converts repository metadata into conservative MCP `AppDraft`s
+  when an operator explicitly runs non-dry-run discovery.
+* `DiscoveryDecision` schema + `discover-v1.0` prompt added for cheap
+  LLM classification: candidate URL → relevant YES/NO, canonical URL,
+  reason, confidence.
+* `apps.agent.pipeline.discovery.classify_candidate` added as pure
+  prompt → LLM → structured decision glue.
+* Celery tasks added:
+  - `discover_rss(limit=20, dry_run=False)`
+  - `discover_github_mcp(limit=20, dry_run=False)`
+* Both discovery tasks are guarded by `AGENT_SOURCES_ENABLED`; beat can
+  invoke them safely while they no-op until `rss` / `github_mcp` are
+  explicitly enabled. Manual dry-runs bypass the flag.
+* Beat schedule added for RSS every 6 hours and GitHub MCP on
+  Mon/Wed/Fri at 06:30 UTC.
+* Source types added: `rss_discovery`, `github_mcp`.
+
+### Tests
+
+Focused discovery run:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_discovery_sources.py \
+  tests/agent/test_discovery_tasks.py -v
+→ 8 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 116 passed
+```
+
+Coverage:
+
+| Scenario | Assertion |
+|---|---|
+| RSS item parse | title/link/summary normalized and HTML stripped |
+| Atom entry parse | GitHub-style Atom entry normalized |
+| GitHub search parse | malformed rows skipped; repo metadata retained |
+| GitHub minimal draft | platform/listing/capability/source metadata conservative |
+| Discovery dry-run | writes `AgentRun`/`EnrichmentTask`/`LLMCallLog`, no `App` |
+| Non-relevant candidate | task marked `skipped` |
+| GitHub apply | with `AGENT_SOURCES_ENABLED=['github_mcp']`, creates DRAFT via `upsert_app_from_draft` |
+| Feature guard | non-dry-run discovery no-ops when source flag disabled |
+
+### Deferred
+
+* README fetch + LLM `EnrichedDraft` for richer GitHub drafts.
+* RSS positive candidates currently create audit rows; full
+  `enrich_new_app_task(url, source_type)` remains the next Phase 3 slice.
+* Production gate still requires ≥ 20 LLM-generated DRAFT and ≥ 50%
+  approval-to-published rate before Phase 4.

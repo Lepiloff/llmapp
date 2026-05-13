@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import pytest
+
+from django.test import override_settings
+
+from apps.agent.llm.client import MockLLMProvider
+from apps.agent.llm.schemas import DiscoveryDecision
+from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog
+from apps.agent.sources.base import DiscoveryCandidate
+from apps.agent.tasks import _run_discovery_batch
+from apps.catalog.models import App, Capability, ListingType, Platform
+from apps.sources.models import Source
+
+
+pytestmark = pytest.mark.django_db
+
+
+def _candidate() -> DiscoveryCandidate:
+    return DiscoveryCandidate(
+        external_id="github:acme/acme-mcp",
+        url="https://github.com/acme/acme-mcp",
+        title="acme/acme-mcp",
+        summary="Acme MCP server",
+        source_name="github_mcp",
+        raw_payload={
+            "full_name": "acme/acme-mcp",
+            "html_url": "https://github.com/acme/acme-mcp",
+            "description": "Acme MCP server",
+        },
+    )
+
+
+def _llm(is_relevant: bool = True) -> MockLLMProvider:
+    return MockLLMProvider(
+        responses_queue=[
+            DiscoveryDecision(
+                is_relevant=is_relevant,
+                canonical_url="https://github.com/acme/acme-mcp",
+                reason="MCP server repository",
+                confidence=0.95,
+            )
+        ]
+    )
+
+
+def test_discovery_dry_run_records_audit_rows_without_persisting() -> None:
+    result = _run_discovery_batch(
+        source_flag="github_mcp",
+        source_label=Source.SourceType.GITHUB_MCP,
+        candidates=[_candidate()],
+        llm=_llm(),
+        dry_run=True,
+        persist_github_drafts=True,
+    )
+
+    assert result["seen"] == 1
+    assert result["relevant"] == 1
+    assert result["persisted"] == 0
+    run = AgentRun.objects.get(source_type=Source.SourceType.GITHUB_MCP)
+    assert run.status == AgentRun.Status.DRY_RUN
+    task = EnrichmentTask.objects.get(run=run)
+    assert task.status == EnrichmentTask.Status.DRY_RUN
+    assert task.app_id is None
+    assert task.diff_summary["candidate"]["external_id"] == "github:acme/acme-mcp"
+    assert LLMCallLog.objects.filter(task=task, is_mock=True).count() == 1
+    assert not App.objects.filter(slug="acme-mcp").exists()
+
+
+def test_discovery_skips_non_relevant_candidate() -> None:
+    result = _run_discovery_batch(
+        source_flag="rss",
+        source_label=Source.SourceType.RSS_DISCOVERY,
+        candidates=[_candidate()],
+        llm=_llm(is_relevant=False),
+        dry_run=True,
+    )
+
+    assert result["seen"] == 1
+    assert result["relevant"] == 0
+    task = EnrichmentTask.objects.get()
+    assert task.status == EnrichmentTask.Status.SKIPPED
+
+
+@override_settings(AGENT_SOURCES_ENABLED=["github_mcp"])
+def test_github_discovery_apply_persists_minimal_draft() -> None:
+    Platform.objects.create(slug="mcp", name="MCP", public_path="mcp-servers")
+    ListingType.objects.create(slug="mcp-server", name="MCP Server")
+    Capability.objects.create(key="open_source", label="Open source")
+
+    result = _run_discovery_batch(
+        source_flag="github_mcp",
+        source_label=Source.SourceType.GITHUB_MCP,
+        candidates=[_candidate()],
+        llm=_llm(),
+        dry_run=False,
+        persist_github_drafts=True,
+    )
+
+    assert result["persisted"] == 1
+    app = App.objects.get(slug="acme-mcp")
+    assert app.status == App.AppStatus.DRAFT
+    assert app.repo_url == "https://github.com/acme/acme-mcp"
+    assert app.platforms.filter(slug="mcp").exists()
+    assert Source.objects.filter(
+        app=app,
+        source_type=Source.SourceType.GITHUB_MCP,
+        external_id="github:acme/acme-mcp",
+    ).exists()
+
+
+def test_discovery_apply_is_feature_flag_guarded() -> None:
+    result = _run_discovery_batch(
+        source_flag="github_mcp",
+        source_label=Source.SourceType.GITHUB_MCP,
+        candidates=[_candidate()],
+        llm=_llm(),
+        dry_run=False,
+        persist_github_drafts=True,
+    )
+
+    assert result == {"skipped": "source_disabled", "source": "github_mcp"}
+    assert not AgentRun.objects.exists()

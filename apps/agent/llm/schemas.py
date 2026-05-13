@@ -120,6 +120,20 @@ class EnrichedDraft(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# DiscoveryDecision — cheap classifier for Phase 3 source candidates
+# ---------------------------------------------------------------------------
+class DiscoveryDecision(BaseModel):
+    """YES/NO decision for whether a discovered URL is catalog-worthy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    is_relevant: bool
+    canonical_url: str
+    reason: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+# ---------------------------------------------------------------------------
 # MergeSet — output of enrich_existing_draft (Phase 1 target)
 # ---------------------------------------------------------------------------
 class MergeSet(BaseModel):

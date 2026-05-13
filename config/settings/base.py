@@ -240,6 +240,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.send_review_queue_digest",
         "schedule": crontab(hour=7, minute=30),
     },
+    "agent_discover_rss": {
+        "task": "apps.agent.tasks.discover_rss",
+        "schedule": crontab(minute=0, hour="*/6"),
+    },
+    "agent_discover_github_mcp": {
+        "task": "apps.agent.tasks.discover_github_mcp",
+        "schedule": crontab(day_of_week="mon,wed,fri", hour=6, minute=30),
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -350,6 +358,7 @@ AGENT_RATE_LIMIT_RPS_PER_DOMAIN = config(
 AGENT_SOURCES_ENABLED = config(
     "AGENT_SOURCES_ENABLED", default="", cast=Csv()
 ) or []
+GITHUB_TOKEN = config("GITHUB_TOKEN", default="")
 
 # ---------------------------------------------------------------------------
 # Project paths

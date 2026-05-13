@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from apps.agent.llm.client import LLMProvider, build_provider
 from apps.agent.models import AgentRun, EnrichmentTask, NeedsReviewQueueEntry
+from apps.agent.pipeline.discovery import DiscoveryResult, classify_candidate
 from apps.agent.persist import (
     AppNotEligibleError,
     PersistResult,
@@ -36,9 +37,19 @@ from apps.agent.persist import (
     record_llm_call,
 )
 from apps.agent.pipeline.enrich import EnrichmentResult, enrich_existing_draft
+from apps.agent.sources.github_mcp_search import (
+    GitHubMCPSearchSource,
+    candidate_to_minimal_draft,
+)
+from apps.agent.sources.rss_feeds import RSSFeedSource
 from apps.sources.models import Source
+from apps.sources.upsert import upsert_app_from_draft
 
 logger = logging.getLogger(__name__)
+
+SOURCE_FLAG_ENRICH_PENDING = "enrich_pending"
+SOURCE_FLAG_RSS = "rss"
+SOURCE_FLAG_GITHUB_MCP = "github_mcp"
 
 
 @dataclass
@@ -239,6 +250,126 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error", "finished_at"])
         raise
+
+
+def _source_enabled(flag: str) -> bool:
+    return flag in set(getattr(settings, "AGENT_SOURCES_ENABLED", []) or [])
+
+
+def _record_discovery(
+    *,
+    run: AgentRun,
+    result: DiscoveryResult,
+    status: str,
+) -> EnrichmentTask:
+    task = EnrichmentTask.objects.create(
+        run=run,
+        app=None,
+        source_url=result.decision.canonical_url or result.candidate.url,
+        status=status,
+        finished_at=timezone.now(),
+        diff_summary=result.as_dict(),
+    )
+    record_llm_call(task, result.call_meta)
+    return task
+
+
+def _run_discovery_batch(
+    *,
+    source_flag: str,
+    source_label: str,
+    candidates,
+    llm: LLMProvider | None,
+    dry_run: bool,
+    persist_github_drafts: bool = False,
+) -> dict:
+    if not dry_run and not _source_enabled(source_flag):
+        return {"skipped": "source_disabled", "source": source_flag}
+
+    run = AgentRun.objects.create(
+        source_type=source_label,
+        status=AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.RUNNING,
+        trigger=AgentRun.Trigger.BEAT,
+    )
+    llm = llm or build_provider("cheap")
+    counters = {"seen": 0, "relevant": 0, "skipped_existing": 0, "persisted": 0}
+    total_cost = 0.0
+    try:
+        for candidate in candidates:
+            counters["seen"] += 1
+            if Source.objects.filter(external_id=candidate.external_id).exists():
+                counters["skipped_existing"] += 1
+                continue
+
+            result = classify_candidate(candidate, llm)
+            total_cost += float(result.call_meta.cost_usd)
+            if not result.decision.is_relevant:
+                _record_discovery(
+                    run=run,
+                    result=result,
+                    status=EnrichmentTask.Status.SKIPPED,
+                )
+                continue
+
+            counters["relevant"] += 1
+            task_status = (
+                EnrichmentTask.Status.DRY_RUN if dry_run else EnrichmentTask.Status.PENDING
+            )
+            _record_discovery(run=run, result=result, status=task_status)
+
+            if persist_github_drafts and not dry_run:
+                draft = candidate_to_minimal_draft(candidate)
+                outcome = upsert_app_from_draft(draft, Source.SourceType.GITHUB_MCP)
+                if outcome in {"new", "updated", "skipped"}:
+                    counters["persisted"] += int(outcome == "new")
+
+        run.status = AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.SUCCEEDED
+        run.stats = counters
+        run.total_cost_usd = total_cost
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "stats", "total_cost_usd", "finished_at"])
+        return counters
+    except Exception as exc:
+        logger.exception("agent_discovery_batch_failed", extra={"run_id": run.pk})
+        run.status = AgentRun.Status.FAILED
+        run.error = str(exc)[:2000]
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "error", "finished_at"])
+        raise
+
+
+@shared_task
+def discover_rss(limit: int = 20, *, dry_run: bool = False) -> dict:
+    """Phase 3 RSS discovery.
+
+    Beat calls this with ``dry_run=False``; it no-ops until
+    ``AGENT_SOURCES_ENABLED`` contains ``rss``. Manual dry-runs bypass
+    the feature flag for prompt/source testing.
+    """
+    source = RSSFeedSource()
+    candidates = source.iter_candidates(limit=limit)
+    return _run_discovery_batch(
+        source_flag=SOURCE_FLAG_RSS,
+        source_label=Source.SourceType.RSS_DISCOVERY,
+        candidates=candidates,
+        llm=None,
+        dry_run=dry_run,
+    )
+
+
+@shared_task
+def discover_github_mcp(limit: int = 20, *, dry_run: bool = False) -> dict:
+    """Phase 3 GitHub MCP discovery."""
+    source = GitHubMCPSearchSource(token=getattr(settings, "GITHUB_TOKEN", ""))
+    candidates = source.iter_candidates(limit=limit)
+    return _run_discovery_batch(
+        source_flag=SOURCE_FLAG_GITHUB_MCP,
+        source_label=Source.SourceType.GITHUB_MCP,
+        candidates=candidates,
+        llm=None,
+        dry_run=dry_run,
+        persist_github_drafts=True,
+    )
 
 
 def review_acceptance_stats(days: int = 30) -> dict:

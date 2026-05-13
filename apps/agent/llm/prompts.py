@@ -6,8 +6,7 @@ The version string is returned alongside so the Django bridge can write
 it to ``LLMCallLog.prompt_version`` — making regression evals
 ("did prompt v1.1 cause acceptance rate to drop?") possible.
 
-Phase 1 only needs the ``enrich_existing_draft`` prompt; ``enrich_new_app``
-arrives in Phase 3.
+Phase 3 adds a cheap discovery-classification prompt for source candidates.
 """
 from __future__ import annotations
 
@@ -25,6 +24,7 @@ class Prompt:
 
 
 ENRICH_EXISTING_DRAFT_VERSION = "enrich-existing-v1.0"
+DISCOVERY_CLASSIFY_VERSION = "discover-v1.0"
 
 
 def enrich_existing_draft_prompt(
@@ -92,4 +92,24 @@ def enrich_existing_draft_prompt(
         version=ENRICH_EXISTING_DRAFT_VERSION,
         system=system,
         messages=[{"role": "user", "content": user_payload}],
+    )
+
+
+def discovery_classify_prompt(candidate_context: str) -> Prompt:
+    """Build the prompt for Phase 3 cheap discovery classification."""
+    system = (
+        "You classify whether a discovered URL should enter the LLM App "
+        "Market catalog pipeline. Return relevant=true only for apps, "
+        "connectors, interactive apps, agents, or MCP servers that extend "
+        "LLM assistants such as ChatGPT, Claude, Gemini, or MCP-compatible "
+        "clients. Return false for generic AI news, model releases, blog "
+        "posts with no installable/integratable product, tutorials, and "
+        "unrelated developer libraries.\n\n"
+        "Use the input URL as canonical_url unless the text clearly names a "
+        "better product/repository URL. Do not invent URLs."
+    )
+    return Prompt(
+        version=DISCOVERY_CLASSIFY_VERSION,
+        system=system,
+        messages=[{"role": "user", "content": candidate_context}],
     )
