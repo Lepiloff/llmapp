@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from apps.agent.llm.schemas import AppSnapshot
+from apps.agent.pipeline.fetch import FetchResult
 from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 
 
@@ -25,6 +26,7 @@ class Prompt:
 
 ENRICH_EXISTING_DRAFT_VERSION = "enrich-existing-v1.0"
 DISCOVERY_CLASSIFY_VERSION = "discover-v1.0"
+ENRICH_NEW_APP_VERSION = "enrich-new-v1.0"
 
 
 def enrich_existing_draft_prompt(
@@ -112,4 +114,38 @@ def discovery_classify_prompt(candidate_context: str) -> Prompt:
         version=DISCOVERY_CLASSIFY_VERSION,
         system=system,
         messages=[{"role": "user", "content": candidate_context}],
+    )
+
+
+def enrich_new_app_prompt(
+    raw_sources: list[FetchResult],
+    taxonomy: TaxonomySnapshot,
+) -> Prompt:
+    """Build the prompt for turning fetched source text into a new draft."""
+    system = (
+        "You extract a structured DRAFT catalog listing for LLM App Market. "
+        "The listing must be an app, connector, interactive app, agent, or "
+        "MCP server that extends LLM assistants. You NEVER publish. "
+        "An editor reviews every draft.\n\n"
+        "Hard rules:\n"
+        "1. Use only facts present in the fetched source text. Do not invent "
+        "URLs, capabilities, pricing, or launch status.\n"
+        "2. Capabilities yes/no require short evidence. Otherwise use unknown.\n"
+        "3. Use only allowed category, listing-type, and capability slugs.\n"
+        "4. Put any editorial one-liner in proposed_verdict; it is never "
+        "written directly to App.verdict.\n"
+        "5. Keep short_description <= 280 characters.\n"
+    )
+    allowed = (
+        f"Allowed platform slugs: {sorted(taxonomy.platform_slugs)}\n"
+        f"Allowed category slugs: {sorted(taxonomy.category_slugs)}\n"
+        f"Allowed listing-type slugs: {sorted(taxonomy.listing_type_slugs)}\n"
+        f"Allowed capability keys: {sorted(taxonomy.capability_keys)}\n"
+    )
+    source_text = "\n\n".join(source.llm_context() for source in raw_sources)
+    user_payload = f"{allowed}\nFetched source material:\n---\n{source_text}\n---\n"
+    return Prompt(
+        version=ENRICH_NEW_APP_VERSION,
+        system=system,
+        messages=[{"role": "user", "content": user_payload}],
     )

@@ -26,17 +26,25 @@ from django.utils import timezone
 from apps.agent.llm.client import LLMProvider, build_provider
 from apps.agent.models import AgentRun, EnrichmentTask, NeedsReviewQueueEntry
 from apps.agent.pipeline.discovery import DiscoveryResult, classify_candidate
+from apps.agent.pipeline.fetch import FetchResult, fetch_url_text
 from apps.agent.persist import (
     AppNotEligibleError,
+    NewDraftPersistResult,
     PersistResult,
     apply_merge_set,
     assert_app_is_eligible,
     build_app_snapshot,
     build_taxonomy_snapshot,
     pending_enrichment_app_ids,
+    persist_new_draft,
     record_llm_call,
 )
-from apps.agent.pipeline.enrich import EnrichmentResult, enrich_existing_draft
+from apps.agent.pipeline.enrich import (
+    EnrichmentResult,
+    NewAppEnrichmentResult,
+    enrich_existing_draft,
+    enrich_new_app,
+)
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
     candidate_to_minimal_draft,
@@ -60,6 +68,17 @@ class EnrichOutcome:
     task_id: int
     result: EnrichmentResult
     persist: PersistResult | None  # None when dry_run=True
+    dry_run: bool
+
+
+@dataclass
+class NewAppOutcome:
+    """High-level result of one new-app enrichment call."""
+
+    run_id: int
+    task_id: int
+    result: NewAppEnrichmentResult
+    persist: NewDraftPersistResult | None
     dry_run: bool
 
 
@@ -184,6 +203,127 @@ def run_enrich_existing_draft(
         raise
 
 
+def run_enrich_new_app(
+    url: str,
+    *,
+    source_type: str,
+    external_id: str = "",
+    llm: LLMProvider | None = None,
+    fetcher=fetch_url_text,
+    dry_run: bool = False,
+    trigger: str = AgentRun.Trigger.MANUAL,
+    triggered_by: str = "",
+    run: AgentRun | None = None,
+) -> NewAppOutcome:
+    """Fetch a candidate URL, enrich it into `EnrichedDraft`, optionally persist."""
+    owns_run = run is None
+    if run is None:
+        run = AgentRun.objects.create(
+            source_type=source_type,
+            status=AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.RUNNING,
+            trigger=trigger,
+            triggered_by=triggered_by[:120],
+        )
+    task = EnrichmentTask.objects.create(
+        run=run,
+        app=None,
+        source_url=url,
+        status=EnrichmentTask.Status.FETCHING,
+    )
+    try:
+        fetched = fetcher(url)
+        if not isinstance(fetched, FetchResult):
+            raise TypeError("fetcher must return apps.agent.pipeline.fetch.FetchResult")
+
+        task.status = EnrichmentTask.Status.ENRICHING
+        task.save(update_fields=["status"])
+
+        llm = llm or build_provider("primary")
+        taxonomy = build_taxonomy_snapshot()
+        result = enrich_new_app([fetched], taxonomy, llm)
+        record_llm_call(task, result.call_meta)
+
+        raw_payload = {
+            "source_url": url,
+            "external_id": external_id or f"{source_type}:{url}",
+            "fetch": fetched.raw_payload,
+        }
+        persist: NewDraftPersistResult | None = None
+        if dry_run:
+            task.status = EnrichmentTask.Status.DRY_RUN
+        else:
+            task.status = EnrichmentTask.Status.VALIDATING
+            task.save(update_fields=["status"])
+            persist = persist_new_draft(
+                result.sanitized_draft,
+                source_type=source_type,
+                external_id=external_id or f"{source_type}:{url}",
+                raw_payload=raw_payload,
+                result=result,
+            )
+            task.status = EnrichmentTask.Status.PERSISTED
+            task.app_id = persist.app_id
+
+        task.diff_summary = result.as_dict()
+        task.finished_at = timezone.now()
+        task.save(update_fields=["app", "status", "diff_summary", "finished_at"])
+
+        if owns_run:
+            run.status = AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.SUCCEEDED
+            run.finished_at = timezone.now()
+            run.total_cost_usd = result.call_meta.cost_usd
+            run.stats = {
+                "drafts_processed": 1,
+                "persisted": int(bool(persist and persist.app_id)),
+                "outcome": persist.outcome if persist else "dry_run",
+            }
+            run.save(update_fields=["status", "finished_at", "total_cost_usd", "stats"])
+
+        return NewAppOutcome(
+            run_id=run.pk,
+            task_id=task.pk,
+            result=result,
+            persist=persist,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        logger.exception("agent_enrich_new_failed", extra={"url": url, "task_id": task.pk})
+        task.status = EnrichmentTask.Status.FAILED
+        task.error = str(exc)[:2000]
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error", "finished_at"])
+        if owns_run:
+            run.status = AgentRun.Status.FAILED
+            run.error = str(exc)[:2000]
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at"])
+        raise
+
+
+@shared_task
+def enrich_new_app_task(
+    url: str,
+    *,
+    source_type: str,
+    external_id: str = "",
+    dry_run: bool = False,
+) -> dict:
+    """Celery wrapper for Phase 3 new-app enrichment."""
+    outcome = run_enrich_new_app(
+        url,
+        source_type=source_type,
+        external_id=external_id,
+        dry_run=dry_run,
+        trigger=AgentRun.Trigger.BEAT,
+    )
+    return {
+        "run_id": outcome.run_id,
+        "task_id": outcome.task_id,
+        "dry_run": outcome.dry_run,
+        "persisted": outcome.persist.as_dict() if outcome.persist else None,
+    }
+
+
 @shared_task
 def enrich_existing_draft_task(app_id: int, *, dry_run: bool = False) -> dict:
     """Celery wrapper around ``run_enrich_existing_draft``."""
@@ -282,6 +422,9 @@ def _run_discovery_batch(
     llm: LLMProvider | None,
     dry_run: bool,
     persist_github_drafts: bool = False,
+    enrich_relevant: bool = False,
+    enrich_llm: LLMProvider | None = None,
+    fetcher=fetch_url_text,
 ) -> dict:
     if not dry_run and not _source_enabled(source_flag):
         return {"skipped": "source_disabled", "source": source_flag}
@@ -317,7 +460,20 @@ def _run_discovery_batch(
             )
             _record_discovery(run=run, result=result, status=task_status)
 
-            if persist_github_drafts and not dry_run:
+            if enrich_relevant and not dry_run:
+                enriched = run_enrich_new_app(
+                    result.decision.canonical_url or candidate.url,
+                    source_type=source_label,
+                    external_id=candidate.external_id,
+                    llm=enrich_llm,
+                    fetcher=fetcher,
+                    dry_run=False,
+                    trigger=AgentRun.Trigger.BEAT,
+                    run=run,
+                )
+                if enriched.persist and enriched.persist.outcome == "new":
+                    counters["persisted"] += 1
+            elif persist_github_drafts and not dry_run:
                 draft = candidate_to_minimal_draft(candidate)
                 outcome = upsert_app_from_draft(draft, Source.SourceType.GITHUB_MCP)
                 if outcome in {"new", "updated", "skipped"}:
@@ -354,6 +510,7 @@ def discover_rss(limit: int = 20, *, dry_run: bool = False) -> dict:
         candidates=candidates,
         llm=None,
         dry_run=dry_run,
+        enrich_relevant=True,
     )
 
 
@@ -368,7 +525,7 @@ def discover_github_mcp(limit: int = 20, *, dry_run: bool = False) -> dict:
         candidates=candidates,
         llm=None,
         dry_run=dry_run,
-        persist_github_drafts=True,
+        enrich_relevant=True,
     )
 
 

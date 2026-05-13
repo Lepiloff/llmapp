@@ -30,9 +30,9 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
-from apps.agent.llm.schemas import AppSnapshot
+from apps.agent.llm.schemas import AppSnapshot, EnrichedDraft
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
-from apps.agent.pipeline.enrich import EnrichmentResult
+from apps.agent.pipeline.enrich import EnrichmentResult, NewAppEnrichmentResult
 from apps.agent.pipeline.merge import Plan, QueueProposal
 from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 from apps.catalog.models import (
@@ -45,6 +45,8 @@ from apps.catalog.models import (
     UseCase,
 )
 from apps.sources.models import Source
+from apps.sources.base import AppDraft
+from apps.sources.upsert import upsert_app_from_draft
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +222,99 @@ class PersistResult:
             "queue_entry_id": self.queue_entry_id,
             "source_id": self.source_id,
         }
+
+
+@dataclass
+class NewDraftPersistResult:
+    """Summary for `persist_new_draft`."""
+
+    outcome: str
+    app_id: int | None
+    source_id: int | None
+
+    def as_dict(self) -> dict:
+        return {
+            "outcome": self.outcome,
+            "app_id": self.app_id,
+            "source_id": self.source_id,
+        }
+
+
+def persist_new_draft(
+    enriched: EnrichedDraft,
+    *,
+    source_type: str,
+    external_id: str,
+    raw_payload: dict,
+    result: NewAppEnrichmentResult | None = None,
+) -> NewDraftPersistResult:
+    """Persist a new LLM-generated draft through the existing upsert layer.
+
+    The LLM never writes published/editorial state. `upsert_app_from_draft`
+    creates DRAFT/UNREVIEWED cards; proposed verdict and the full
+    enrichment audit stay inside `Source.payload`.
+    """
+    draft = _enriched_to_app_draft(
+        enriched,
+        external_id=external_id,
+        raw_payload=raw_payload,
+    )
+    outcome = upsert_app_from_draft(draft, source_type)
+    source = Source.objects.filter(
+        source_type=source_type,
+        external_id=external_id,
+    ).select_related("app").first()
+    if source and result is not None:
+        payload = {
+            **(source.payload or {}),
+            "agent_enrichment": result.as_dict(),
+            "proposed_verdict": enriched.proposed_verdict,
+            "scope_summary": enriched.scope_summary,
+        }
+        Source.objects.filter(pk=source.pk).update(payload=payload)
+    return NewDraftPersistResult(
+        outcome=outcome,
+        app_id=source.app_id if source else None,
+        source_id=source.pk if source else None,
+    )
+
+
+def _enriched_to_app_draft(
+    enriched: EnrichedDraft,
+    *,
+    external_id: str,
+    raw_payload: dict,
+) -> AppDraft:
+    platform_slugs = ["mcp"] if any(
+        lt.slug == "mcp-server" for lt in enriched.listing_types
+    ) else []
+    return AppDraft(
+        name=enriched.name,
+        slug_hint=enriched.name,
+        short_description=enriched.short_description[:280],
+        long_description=enriched.long_description,
+        developer_name=enriched.developer_name,
+        developer_url=enriched.developer_url,
+        official_page_url=enriched.official_page_url,
+        install_url=enriched.install_url,
+        repo_url=enriched.repo_url,
+        platforms=platform_slugs,
+        listing_types=[lt.slug for lt in enriched.listing_types],
+        categories=[cat.slug for cat in enriched.categories],
+        capabilities={
+            key: proposal.value
+            for key, proposal in enriched.capabilities.items()
+        },
+        pricing_model=enriched.pricing_model,
+        launch_status=enriched.launch_status,
+        external_id=external_id,
+        raw_payload={
+            **raw_payload,
+            "proposed_verdict": enriched.proposed_verdict,
+            "scope_summary": enriched.scope_summary,
+        },
+        scope_summary=enriched.scope_summary,
+    )
 
 
 # Columns this module is FORBIDDEN to touch — listed to keep the

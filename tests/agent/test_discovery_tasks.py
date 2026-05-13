@@ -5,11 +5,18 @@ import pytest
 from django.test import override_settings
 
 from apps.agent.llm.client import MockLLMProvider
-from apps.agent.llm.schemas import DiscoveryDecision
+from apps.agent.llm.schemas import (
+    CapabilityProposal,
+    CategoryProposal,
+    DiscoveryDecision,
+    EnrichedDraft,
+    ListingTypeProposal,
+)
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog
+from apps.agent.pipeline.fetch import FetchResult
 from apps.agent.sources.base import DiscoveryCandidate
 from apps.agent.tasks import _run_discovery_batch
-from apps.catalog.models import App, Capability, ListingType, Platform
+from apps.catalog.models import App, Capability, Category, ListingType, Platform
 from apps.sources.models import Source
 
 
@@ -41,6 +48,40 @@ def _llm(is_relevant: bool = True) -> MockLLMProvider:
                 confidence=0.95,
             )
         ]
+    )
+
+
+def _enrich_llm() -> MockLLMProvider:
+    return MockLLMProvider(
+        responses_queue=[
+            EnrichedDraft(
+                name="Acme MCP",
+                short_description="Open source MCP server for Acme.",
+                official_page_url="https://github.com/acme/acme-mcp",
+                repo_url="https://github.com/acme/acme-mcp",
+                listing_types=[ListingTypeProposal(slug="mcp-server", confidence=0.95)],
+                categories=[CategoryProposal(slug="developer-tools", confidence=0.9)],
+                capabilities={
+                    "open_source": CapabilityProposal(
+                        value="yes",
+                        evidence="Open source MCP server",
+                        confidence=0.95,
+                    )
+                },
+                proposed_verdict="Useful for Acme users.",
+            )
+        ]
+    )
+
+
+def _fetcher(url: str) -> FetchResult:
+    return FetchResult(
+        url=url,
+        final_url=url,
+        status_code=200,
+        content_type="text/markdown",
+        text="# Acme MCP\nOpen source MCP server for Acme.",
+        raw_payload={"fixture": True},
     )
 
 
@@ -121,3 +162,35 @@ def test_discovery_apply_is_feature_flag_guarded() -> None:
 
     assert result == {"skipped": "source_disabled", "source": "github_mcp"}
     assert not AgentRun.objects.exists()
+
+
+@override_settings(AGENT_SOURCES_ENABLED=["github_mcp"])
+def test_discovery_apply_can_run_full_new_app_enrichment() -> None:
+    Platform.objects.create(slug="mcp", name="MCP", public_path="mcp-servers")
+    ListingType.objects.create(slug="mcp-server", name="MCP Server")
+    Category.objects.create(slug="developer-tools", name="Developer Tools")
+    Capability.objects.create(key="open_source", label="Open source")
+
+    result = _run_discovery_batch(
+        source_flag="github_mcp",
+        source_label=Source.SourceType.GITHUB_MCP,
+        candidates=[_candidate()],
+        llm=_llm(),
+        dry_run=False,
+        enrich_relevant=True,
+        enrich_llm=_enrich_llm(),
+        fetcher=_fetcher,
+    )
+
+    assert result["seen"] == 1
+    assert result["relevant"] == 1
+    assert result["persisted"] == 1
+    app = App.objects.get(slug="acme-mcp")
+    assert app.short_description == "Open source MCP server for Acme."
+    assert app.verdict == ""
+    tasks = list(EnrichmentTask.objects.order_by("id"))
+    assert [task.status for task in tasks] == [
+        EnrichmentTask.Status.PENDING,
+        EnrichmentTask.Status.PERSISTED,
+    ]
+    assert LLMCallLog.objects.count() == 2

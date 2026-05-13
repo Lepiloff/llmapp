@@ -120,6 +120,27 @@ class _OpenAIMergeSet(BaseModel):
     rationale: str
 
 
+class _OpenAIEnrichedDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    short_description: str
+    long_description: str
+    developer_name: str
+    developer_url: str
+    official_page_url: str
+    install_url: str
+    repo_url: str
+    listing_types: list[_OpenAIListingTypeProposal]
+    categories: list[_OpenAICategoryProposal]
+    capabilities: list[_OpenAICapabilityProposal]
+    use_cases: list[str]
+    launch_status: Literal["live", "beta", "waitlist", "deprecated"]
+    pricing_model: Literal["free", "paid", "freemium", "unknown"]
+    proposed_verdict: str
+    scope_summary: str
+
+
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
@@ -506,6 +527,8 @@ def _safe_provider_error(exc: Exception) -> str:
 def _openai_wire_schema_for(schema: type[SchemaT]) -> type[BaseModel]:
     if schema.__name__ == "MergeSet":
         return _OpenAIMergeSet
+    if schema.__name__ == "EnrichedDraft":
+        return _OpenAIEnrichedDraft
     return schema
 
 
@@ -513,6 +536,17 @@ def _coerce_openai_output(parsed: BaseModel, *, target_schema: type[SchemaT]) ->
     if isinstance(parsed, target_schema):
         return parsed
     if target_schema.__name__ == "MergeSet" and isinstance(parsed, _OpenAIMergeSet):
+        payload = parsed.model_dump()
+        payload["capabilities"] = {
+            item["key"]: {
+                "value": item["value"],
+                "evidence": item["evidence"],
+                "confidence": item["confidence"],
+            }
+            for item in payload.pop("capabilities")
+        }
+        return target_schema.model_validate(payload)
+    if target_schema.__name__ == "EnrichedDraft" and isinstance(parsed, _OpenAIEnrichedDraft):
         payload = parsed.model_dump()
         payload["capabilities"] = {
             item["key"]: {

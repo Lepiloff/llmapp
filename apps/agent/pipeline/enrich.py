@@ -25,13 +25,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from apps.agent.llm.client import LLMCallMetadata, LLMProvider
-from apps.agent.llm.prompts import enrich_existing_draft_prompt
-from apps.agent.llm.schemas import AppSnapshot, MergeSet
+from apps.agent.llm.prompts import enrich_existing_draft_prompt, enrich_new_app_prompt
+from apps.agent.llm.schemas import AppSnapshot, EnrichedDraft, MergeSet
+from apps.agent.pipeline.fetch import FetchResult
 from apps.agent.pipeline.merge import MergeOutcome, compute_merge
 from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 from apps.agent.pipeline.validate import (
     DEFAULT_CONFIDENCE_FLOOR,
     ValidationReport,
+    validate_enriched_draft,
     validate_merge_set,
 )
 
@@ -57,6 +59,23 @@ class EnrichmentResult:
             "sanitized_merge": self.sanitized_merge.model_dump(),
             "validation": self.validation.as_dict(),
             "outcome": self.outcome.as_dict(),
+        }
+
+
+@dataclass
+class NewAppEnrichmentResult:
+    """Structured result for a newly discovered candidate."""
+
+    raw_draft: EnrichedDraft
+    sanitized_draft: EnrichedDraft
+    validation: ValidationReport
+    call_meta: LLMCallMetadata
+
+    def as_dict(self) -> dict:
+        return {
+            "raw_draft": self.raw_draft.model_dump(),
+            "sanitized_draft": self.sanitized_draft.model_dump(),
+            "validation": self.validation.as_dict(),
         }
 
 
@@ -93,5 +112,36 @@ def enrich_existing_draft(
         sanitized_merge=sanitized,
         validation=validation,
         outcome=outcome,
+        call_meta=response.meta,
+    )
+
+
+def enrich_new_app(
+    raw_sources: list[FetchResult],
+    taxonomy: TaxonomySnapshot,
+    llm: LLMProvider,
+    *,
+    confidence_floor: float = DEFAULT_CONFIDENCE_FLOOR,
+) -> NewAppEnrichmentResult:
+    """Run prompt → LLM → validate for a newly discovered candidate. Pure."""
+    prompt = enrich_new_app_prompt(raw_sources, taxonomy)
+    response = llm.complete(
+        system=prompt.system,
+        messages=prompt.messages,
+        schema=EnrichedDraft,
+        taxonomy=taxonomy,
+        prompt_version=prompt.version,
+    )
+    raw_draft = response.data
+    assert isinstance(raw_draft, EnrichedDraft), (
+        "LLMProvider returned wrong schema for new app enrichment."
+    )
+    sanitized, validation = validate_enriched_draft(
+        raw_draft, taxonomy, confidence_floor=confidence_floor
+    )
+    return NewAppEnrichmentResult(
+        raw_draft=raw_draft,
+        sanitized_draft=sanitized,
+        validation=validation,
         call_meta=response.meta,
     )

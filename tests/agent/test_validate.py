@@ -6,11 +6,12 @@ import pytest
 from apps.agent.llm.schemas import (
     CapabilityProposal,
     CategoryProposal,
+    EnrichedDraft,
     ListingTypeProposal,
     MergeSet,
 )
 from apps.agent.pipeline.taxonomy import TaxonomySnapshot
-from apps.agent.pipeline.validate import validate_merge_set
+from apps.agent.pipeline.validate import validate_enriched_draft, validate_merge_set
 
 
 @pytest.fixture
@@ -105,3 +106,31 @@ def test_validator_never_mutates_input(taxonomy) -> None:
     snapshot = original.model_copy(deep=True)
     validate_merge_set(original, taxonomy)
     assert original == snapshot
+
+
+def test_validate_enriched_draft_applies_same_guardrails(taxonomy) -> None:
+    draft = EnrichedDraft(
+        name="Acme MCP",
+        official_page_url="not-a-url",
+        listing_types=[
+            ListingTypeProposal(slug="mcp-server", confidence=0.9),
+            ListingTypeProposal(slug="unknown", confidence=0.9),
+        ],
+        categories=[
+            CategoryProposal(slug="developer-tools", confidence=0.9),
+            CategoryProposal(slug="productivity", confidence=0.2),
+        ],
+        capabilities={
+            "open_source": CapabilityProposal(value="yes", evidence=""),
+            "unknown_cap": CapabilityProposal(value="yes", evidence="Source"),
+        },
+    )
+
+    sanitized, report = validate_enriched_draft(draft, taxonomy)
+
+    assert sanitized.official_page_url == ""
+    assert [lt.slug for lt in sanitized.listing_types] == ["mcp-server"]
+    assert [cat.slug for cat in sanitized.categories] == ["developer-tools"]
+    assert sanitized.capabilities["open_source"].value == "unknown"
+    assert "unknown_cap" not in sanitized.capabilities
+    assert report.dropped_urls_invalid == [("official_page_url", "not-a-url")]

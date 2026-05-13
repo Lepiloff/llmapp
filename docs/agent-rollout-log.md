@@ -591,3 +591,48 @@ Coverage:
   `enrich_new_app_task(url, source_type)` remains the next Phase 3 slice.
 * Production gate still requires ≥ 20 LLM-generated DRAFT and ≥ 50%
   approval-to-published rate before Phase 4.
+
+### Slice 2 — New-app enrichment path (2026-05-13)
+
+* `apps.agent.pipeline.fetch.FetchResult` + `fetch_url_text` added as the
+  first fetch primitive for candidate URL enrichment.
+* `enrich_new_app_prompt` (`enrich-new-v1.0`) added. It asks for
+  `EnrichedDraft` and repeats the same hard rules: evidence for
+  yes/no capabilities, allowed taxonomy slugs only, no invented URLs,
+  verdict only as proposal.
+* `validate_enriched_draft` added so new-card enrichment gets the same
+  guardrails as existing-draft merge: unknown slugs dropped, low
+  confidence taxonomy dropped, invalid URLs stripped, evidenceless
+  capabilities downgraded to `unknown`.
+* `apps.agent.persist.persist_new_draft` added as the only Django bridge
+  for new LLM-generated cards. It converts sanitized `EnrichedDraft` to
+  `AppDraft` and persists via `upsert_app_from_draft`; `App.status`
+  remains `draft`, `editorial_review_status` remains `unreviewed`, and
+  `proposed_verdict` stays in `Source.payload`.
+* `run_enrich_new_app` + `enrich_new_app_task` added. Dry-runs write
+  `AgentRun` / `EnrichmentTask` / `LLMCallLog` only; apply mode creates
+  a DRAFT and links the task to the created App.
+* Discovery batches now call full new-app enrichment for relevant
+  candidates when the source is enabled. `discover_rss` uses
+  `rss_discovery`; `discover_github_mcp` uses `github_mcp`.
+* OpenAI wire schema extended for `EnrichedDraft` so real structured
+  output can return capability lists while internal pipeline still uses
+  a capability dict.
+
+Focused tests:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_enrich_new_app_task.py \
+  tests/agent/test_validate.py tests/agent/test_llm_client.py -v
+→ 21 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_discovery_tasks.py \
+  tests/agent/test_enrich_new_app_task.py -v
+→ 7 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 121 passed
+```

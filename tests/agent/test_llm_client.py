@@ -14,6 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 from apps.agent.llm.client import (
     LLMProviderError,
     LLMProviderRefusal,
+    _OpenAIEnrichedDraft,
     OpenAIProvider,
     _OpenAIMergeSet,
     _estimate_cost_usd,
@@ -21,7 +22,7 @@ from apps.agent.llm.client import (
     _safe_provider_error,
     build_provider,
 )
-from apps.agent.llm.schemas import MergeSet
+from apps.agent.llm.schemas import EnrichedDraft, MergeSet
 
 
 class FakeOpenAICompletions:
@@ -88,6 +89,29 @@ def _openai_merge(**overrides) -> _OpenAIMergeSet:
     }
     payload.update(overrides)
     return _OpenAIMergeSet(**payload)
+
+
+def _openai_enriched(**overrides) -> _OpenAIEnrichedDraft:
+    payload = {
+        "name": "Acme MCP",
+        "short_description": "Acme MCP server",
+        "long_description": "",
+        "developer_name": "Acme",
+        "developer_url": "https://example.com",
+        "official_page_url": "https://example.com/acme",
+        "install_url": "",
+        "repo_url": "https://github.com/acme/acme-mcp",
+        "listing_types": [{"slug": "mcp-server", "confidence": 0.95}],
+        "categories": [{"slug": "developer-tools", "confidence": 0.9}],
+        "capabilities": [],
+        "use_cases": ["connect Acme"],
+        "launch_status": "live",
+        "pricing_model": "unknown",
+        "proposed_verdict": "Useful for Acme users.",
+        "scope_summary": "Reads Acme data.",
+    }
+    payload.update(overrides)
+    return _OpenAIEnrichedDraft(**payload)
 
 
 def test_openai_provider_returns_parsed_schema_and_metadata() -> None:
@@ -220,6 +244,39 @@ def test_openai_wire_schema_converts_capability_list_to_internal_dict() -> None:
 
     assert response.data.capabilities["open_source"].value == "yes"
     assert response.data.capabilities["open_source"].evidence == "GitHub repository"
+
+
+def test_openai_wire_schema_converts_enriched_draft_capability_list() -> None:
+    completions = FakeOpenAICompletions(
+        _completion(
+            parsed=_openai_enriched(
+                capabilities=[
+                    {
+                        "key": "open_source",
+                        "value": "yes",
+                        "evidence": "Public GitHub repository",
+                        "confidence": 0.91,
+                    }
+                ]
+            ),
+            usage=_usage(),
+        )
+    )
+    provider = OpenAIProvider(
+        model="test-model",
+        api_key="test-key",
+        client=_fake_client(completions),
+    )
+
+    response = provider.complete(
+        system="system",
+        messages=[{"role": "user", "content": "body"}],
+        schema=EnrichedDraft,
+    )
+
+    assert isinstance(response.data, EnrichedDraft)
+    assert response.data.capabilities["open_source"].value == "yes"
+    assert completions.calls[0]["response_format"] is _OpenAIEnrichedDraft
 
 
 def test_build_provider_requires_model_for_real_provider() -> None:

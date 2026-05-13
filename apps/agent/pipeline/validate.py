@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 from apps.agent.llm.schemas import (
     CapabilityProposal,
     CategoryProposal,
+    EnrichedDraft,
     ListingTypeProposal,
     MergeSet,
 )
@@ -147,6 +148,68 @@ def validate_merge_set(
             "capabilities": cleaned_capabilities,
             "add_categories": cleaned_categories,
             "add_listing_types": cleaned_listing_types,
+            **url_updates,
+        }
+    )
+    return sanitized, report
+
+
+def validate_enriched_draft(
+    draft: EnrichedDraft,
+    taxonomy: TaxonomySnapshot,
+    *,
+    confidence_floor: float = DEFAULT_CONFIDENCE_FLOOR,
+) -> tuple[EnrichedDraft, ValidationReport]:
+    """Sanitize an `EnrichedDraft` before converting it to `AppDraft`."""
+    report = ValidationReport()
+
+    cleaned_capabilities: dict[str, CapabilityProposal] = {}
+    for key, proposal in draft.capabilities.items():
+        if not taxonomy.has_capability(key):
+            report.dropped_capabilities_unknown_key.append(key)
+            continue
+        if proposal.value in ("yes", "no") and not proposal.evidence.strip():
+            cleaned_capabilities[key] = CapabilityProposal(
+                value="unknown",
+                evidence="",
+                confidence=proposal.confidence,
+            )
+            report.dropped_capabilities_no_evidence.append(key)
+        else:
+            cleaned_capabilities[key] = proposal
+
+    cleaned_categories: list[CategoryProposal] = []
+    for cat in draft.categories:
+        if not taxonomy.has_category(cat.slug):
+            report.dropped_categories_unknown_slug.append(cat.slug)
+            continue
+        if cat.confidence < confidence_floor:
+            report.dropped_categories_low_confidence.append(cat.slug)
+            continue
+        cleaned_categories.append(cat)
+
+    cleaned_listing_types: list[ListingTypeProposal] = []
+    for lt in draft.listing_types:
+        if not taxonomy.has_listing_type(lt.slug):
+            report.dropped_listing_types_unknown_slug.append(lt.slug)
+            continue
+        if lt.confidence < confidence_floor:
+            report.dropped_listing_types_low_confidence.append(lt.slug)
+            continue
+        cleaned_listing_types.append(lt)
+
+    url_updates: dict[str, str] = {}
+    for fld in ("developer_url", "official_page_url", "install_url", "repo_url"):
+        value = getattr(draft, fld)
+        if value and not _is_valid_http_url(value):
+            url_updates[fld] = ""
+            report.dropped_urls_invalid.append((fld, value))
+
+    sanitized = draft.model_copy(
+        update={
+            "capabilities": cleaned_capabilities,
+            "categories": cleaned_categories,
+            "listing_types": cleaned_listing_types,
             **url_updates,
         }
     )
