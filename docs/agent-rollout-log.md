@@ -159,3 +159,118 @@ re-actualization / production link-check automation** in Phase 4:
 Both fixes are small but require their own regression tests (currently
 the link-checker has no test coverage). **Tracked as Phase 4
 pre-requisites in `docs/agent-pipeline.md`.**
+
+---
+
+## Phase 1 — Foundation + enrich_existing_draft (mock-only, 2026-05-13)
+
+Per gate decision: start with the minimal slice — pure-Python core,
+mocked LLMProvider, ``--dry-run`` by default. Real Anthropic / OpenAI
+provider wiring (Phase 1b) is deferred until all the merge / persist
+invariants are green against fixtures.
+
+### Shipped
+
+* **`apps/agent/` Django app** scaffolded, registered in
+  `INSTALLED_APPS`. Migration `agent.0001_initial` applied to dev DB.
+* **Models** (`apps/agent/models.py`): `AgentRun`, `EnrichmentTask`,
+  `LLMCallLog`, `NeedsReviewQueueEntry`. All four are read-only in admin.
+* **Pure-Python core**:
+  - `apps/agent/llm/schemas.py` — Pydantic v2 contracts:
+    `CapabilityProposal` (with evidence + confidence),
+    `CategoryProposal`, `ListingTypeProposal`, `EnrichedDraft`,
+    `MergeSet`, `AppSnapshot`. All `extra="forbid"`.
+  - `apps/agent/llm/client.py` — `LLMProvider` ABC + factory
+    `build_provider(role)`. `AnthropicProvider` / `OpenAIProvider`
+    stubs raise `NotImplementedError` until Phase 1b.
+    `MockLLMProvider` drives every test.
+  - `apps/agent/llm/prompts.py` — versioned prompt template
+    (`enrich-existing-v1.0`). Hard rules embedded in the system
+    prompt mirror the validator + merge guardrails.
+  - `apps/agent/pipeline/taxonomy.py` — frozen `TaxonomySnapshot`
+    dataclass — the only structural seam between Django and the
+    pure-Python pipeline.
+  - `apps/agent/pipeline/validate.py` — second-layer guardrails:
+    evidence-less yes/no → unknown, unknown slugs dropped,
+    low-confidence categories dropped, invalid URLs nulled out.
+    Returns sanitized `MergeSet` + structured `ValidationReport`.
+  - `apps/agent/pipeline/merge.py` — never-overwrite-editorial-intent
+    policy. Produces `Plan` (safe writes) + `QueueProposal` (anything
+    requiring editor review).
+  - `apps/agent/pipeline/enrich.py` — orchestrator chaining
+    prompt → LLM → validate → merge.
+* **Django bridge** (`apps/agent/persist.py`):
+  - `build_taxonomy_snapshot`, `build_app_snapshot` build the
+    pure-Python views from ORM.
+  - `apply_merge_set` writes the plan inside a single transaction.
+    Asserts no plan ever touches `App.status` /
+    `editorial_review_status` / `platform_verification_status` /
+    `developer_claim_status` / `verdict` (defense in depth — the
+    merge layer already refuses).
+  - Records a `Source(external_id='agent-enrich:<app_id>')` row
+    carrying the full audit payload (raw merge, sanitized merge,
+    validation report, plan, queue).
+* **Celery tasks** (`apps/agent/tasks.py`): `enrich_existing_draft_task`
+  + `enrich_pending_drafts_batch` (not added to beat schedule —
+  Phase 1b decision).
+* **Management command**: `manage.py agent_run --enrich-app=<slug>`
+  / `--enrich-pending --limit N`. Defaults to dry-run; `--apply`
+  required to write to the catalog.
+* **Settings**: `AGENT_LLM_PROVIDER_PRIMARY` / `_CHEAP`,
+  `AGENT_LLM_MODEL_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `AGENT_MONTHLY_BUDGET_USD`, `AGENT_RATE_LIMIT_RPS_PER_DOMAIN`,
+  `AGENT_SOURCES_ENABLED`. All optional; provider defaults to `mock`
+  so the app imports cleanly without API keys.
+* **Dependency**: `pydantic>=2.5,<3.0` added to `pyproject.toml`.
+
+### Tests
+
+```
+pytest tests/ --create-db → 75 passed
+```
+
+Breakdown:
+
+| File | Coverage | Count |
+|---|---|---|
+| `tests/agent/test_schemas.py` | Pydantic invariants — extra="forbid", evidence trimming, value enums, confidence bounds | 10 |
+| `tests/agent/test_taxonomy.py` | Snapshot building, frozen-ness, membership helpers | 3 |
+| `tests/agent/test_validate.py` | UNKNOWN-by-default, unknown slugs dropped, confidence floor, invalid URLs | 9 |
+| `tests/agent/test_merge.py` | Never-overwrite contract; capability flips; editorial proposals route to queue; forbidden-field invariant | 17 |
+| `tests/agent/test_enrich.py` | End-to-end pure-Python pipeline with MockLLMProvider | 5 |
+| `tests/agent/test_persist.py` | Hard DB invariants (status/verdict never moved), atomicity, queue payload | 10 |
+| `tests/agent/test_agent_run_command.py` | `manage.py agent_run` dry-run + apply | 3 |
+| `tests/sources/*` (Phase 0) | Existing | 18 |
+
+### Hard-invariant evidence
+
+* No test in `tests/agent/` ever observes `App.status` move from
+  `DRAFT`, `editorial_review_status` move from `UNREVIEWED`, or
+  `App.verdict` become non-empty after `apply_merge_set`.
+  `test_status_fields_never_change` asserts all five forbidden
+  columns explicitly with an LLM response that proposes editorial
+  changes for each.
+* `_assert_plan_does_not_touch_forbidden` in `persist.py` raises if a
+  hypothetical future regression in the merge layer ever proposes
+  a forbidden-field write — defense in depth.
+* `test_existing_text_field_is_NEVER_overwritten` confirms that even
+  when the LLM proposes a different value, the App keeps the
+  editor's text and the disagreement routes to
+  `NeedsReviewQueueEntry`.
+* `test_existing_capability_yes_is_NEVER_flipped` — same for
+  capabilities.
+
+### Out of scope (Phase 1b)
+
+* `AnthropicProvider` / `OpenAIProvider` real implementations
+  (token-counting, retry, prompt-caching). Currently raise
+  `NotImplementedError` so deployments without API keys can run
+  Phase 1 in mock-only mode.
+* `enrich_pending_drafts_batch` is registered as a task but NOT
+  wired into `CELERY_BEAT_SCHEDULE`. Operators trigger via
+  `manage.py agent_run --enrich-pending` until real-LLM is live.
+* Acceptance-criteria items #6 (cost/card + latency/card from real
+  models) and #7 (editor acceptance rate ≥ 60% on 10 cards) require
+  Phase 1b + live editor review and are scheduled accordingly.
+
+**Phase 1 part-1 complete. Gate to Phase 1b (real LLM providers): OPEN.**

@@ -61,6 +61,7 @@ LOCAL_APPS = [
     "apps.editorial",
     "apps.analytics",
     "apps.newsletter",
+    "apps.agent",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -302,6 +303,40 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
+
+# ---------------------------------------------------------------------------
+# Agent pipeline (Phase 1+) — see docs/agent-pipeline.md
+# ---------------------------------------------------------------------------
+# Provider selection. The pipeline is dual-provider-capable; either Anthropic
+# or OpenAI can be plugged in for the "primary" (full enrichment) and "cheap"
+# (discovery / classification) roles, and the two roles can share a provider.
+# A real key is only required when the matching provider is actually used.
+# Both default empty so the agent app imports cleanly in CI / on dev machines
+# without API access; the LLMProvider factory raises ImproperlyConfigured at
+# call-time if a real provider is requested without credentials.
+AGENT_LLM_PROVIDER_PRIMARY = config("AGENT_LLM_PROVIDER_PRIMARY", default="mock")
+AGENT_LLM_PROVIDER_CHEAP = config("AGENT_LLM_PROVIDER_CHEAP", default="mock")
+AGENT_LLM_MODEL_PRIMARY = config("AGENT_LLM_MODEL_PRIMARY", default="")
+AGENT_LLM_MODEL_CHEAP = config("AGENT_LLM_MODEL_CHEAP", default="")
+ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
+OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+
+# Budget cap (hard stop at 100%, alert at 80%). Empty = no budget enforcement
+# (acceptable only during Phase 1 mock-only mode); must be set before any
+# real-API beat task is enabled.
+AGENT_MONTHLY_BUDGET_USD = config("AGENT_MONTHLY_BUDGET_USD", default="", cast=str)
+
+# Polite-client controls.
+AGENT_RATE_LIMIT_RPS_PER_DOMAIN = config(
+    "AGENT_RATE_LIMIT_RPS_PER_DOMAIN", default=1.0, cast=float
+)
+
+# Feature flag — controls which sources beat is allowed to run. Empty = all
+# disabled; the manual `manage.py agent_run` command bypasses this so Phase 1
+# can be exercised entirely from the CLI before beat is touched.
+AGENT_SOURCES_ENABLED = config(
+    "AGENT_SOURCES_ENABLED", default="", cast=Csv()
+) or []
 
 # ---------------------------------------------------------------------------
 # Project paths
