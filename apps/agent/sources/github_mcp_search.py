@@ -1,11 +1,15 @@
 """GitHub MCP repository discovery source."""
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Callable, Iterable
+from urllib.parse import urlparse
 
 import requests
 from django.utils.text import slugify
 
+from apps.agent.pipeline.fetch import FetchResult
 from apps.sources.base import AppDraft
 
 from .base import DiscoveryCandidate
@@ -118,3 +122,79 @@ def candidate_to_minimal_draft(candidate: DiscoveryCandidate) -> AppDraft:
             "repository_url": candidate.url,
         },
     )
+
+
+def fetch_github_readme_text(
+    repo_url: str,
+    *,
+    token: str = "",
+    get_json: GitHubGet | None = None,
+) -> FetchResult:
+    """Fetch README content through the GitHub Contents API.
+
+    The LLM gets cleaner signal from README markdown than from GitHub's
+    HTML repository page. This function is intentionally test-injectable:
+    production uses authenticated `requests`, tests pass `get_json`.
+    """
+    full_name = _repo_full_name_from_url(repo_url)
+    if not full_name:
+        raise ValueError(f"Not a GitHub repository URL: {repo_url!r}")
+    api_url = f"https://api.github.com/repos/{full_name}/readme"
+    getter = get_json or _requests_get_json_with_token(token=token)
+    payload = getter(
+        api_url,
+        {},
+        {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "LLMAppMarket-Agent/1.0 (+https://llmappmarket.com/bots)",
+            **({"Authorization": f"Bearer {token}"} if token else {}),
+        },
+    )
+    text = _decode_readme_payload(payload)
+    return FetchResult(
+        url=repo_url,
+        final_url=payload.get("html_url") or repo_url,
+        status_code=200,
+        content_type="text/markdown",
+        text=text,
+        raw_payload={
+            "source": "github_readme",
+            "repo_url": repo_url,
+            "api_url": api_url,
+            "html_url": payload.get("html_url") or "",
+            "download_url": payload.get("download_url") or "",
+            "path": payload.get("path") or "",
+            "size": payload.get("size") or 0,
+        },
+    )
+
+
+def _requests_get_json_with_token(*, token: str) -> GitHubGet:
+    def _get(url: str, params: dict, headers: dict) -> dict:
+        resp = requests.get(url, params=params, headers=headers, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    return _get
+
+
+def _repo_full_name_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        return ""
+    parts = [p for p in parsed.path.strip("/").split("/") if p]
+    if len(parts) < 2:
+        return ""
+    return f"{parts[0]}/{parts[1]}"
+
+
+def _decode_readme_payload(payload: dict) -> str:
+    encoding = (payload.get("encoding") or "").lower()
+    content = payload.get("content") or ""
+    if encoding != "base64" or not content:
+        raise ValueError("GitHub README payload is missing base64 content.")
+    try:
+        raw = base64.b64decode(content, validate=False)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("GitHub README payload contains invalid base64.") from exc
+    return raw.decode("utf-8", errors="replace")

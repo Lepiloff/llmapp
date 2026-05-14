@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+
 from apps.agent.sources.github_mcp_search import (
     candidate_to_minimal_draft,
+    fetch_github_readme_text,
     parse_search_response,
 )
 from apps.agent.sources.rss_feeds import parse_feed
@@ -90,3 +93,30 @@ def test_github_candidate_to_minimal_draft() -> None:
     assert draft.listing_types == ["mcp-server"]
     assert draft.capabilities["open_source"] == "yes"
     assert draft.repo_url == "https://github.com/acme/acme-mcp"
+
+
+def test_fetch_github_readme_text_uses_contents_api() -> None:
+    calls = []
+
+    def fake_get_json(url: str, params: dict, headers: dict) -> dict:
+        calls.append({"url": url, "params": params, "headers": headers})
+        return {
+            "encoding": "base64",
+            "content": base64.b64encode(b"# Acme MCP\nREADME body").decode("ascii"),
+            "html_url": "https://github.com/acme/acme-mcp/blob/main/README.md",
+            "download_url": "https://raw.githubusercontent.com/acme/acme-mcp/main/README.md",
+            "path": "README.md",
+            "size": 22,
+        }
+
+    result = fetch_github_readme_text(
+        "https://github.com/acme/acme-mcp",
+        token="gh-token",
+        get_json=fake_get_json,
+    )
+
+    assert calls[0]["url"] == "https://api.github.com/repos/acme/acme-mcp/readme"
+    assert calls[0]["headers"]["Authorization"] == "Bearer gh-token"
+    assert result.content_type == "text/markdown"
+    assert result.text == "# Acme MCP\nREADME body"
+    assert result.raw_payload["source"] == "github_readme"

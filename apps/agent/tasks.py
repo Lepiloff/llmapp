@@ -48,6 +48,7 @@ from apps.agent.pipeline.enrich import (
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
     candidate_to_minimal_draft,
+    fetch_github_readme_text,
 )
 from apps.agent.sources.rss_feeds import RSSFeedSource
 from apps.sources.models import Source
@@ -519,6 +520,7 @@ def discover_github_mcp(limit: int = 20, *, dry_run: bool = False) -> dict:
     """Phase 3 GitHub MCP discovery."""
     source = GitHubMCPSearchSource(token=getattr(settings, "GITHUB_TOKEN", ""))
     candidates = source.iter_candidates(limit=limit)
+    github_token = getattr(settings, "GITHUB_TOKEN", "")
     return _run_discovery_batch(
         source_flag=SOURCE_FLAG_GITHUB_MCP,
         source_label=Source.SourceType.GITHUB_MCP,
@@ -526,6 +528,7 @@ def discover_github_mcp(limit: int = 20, *, dry_run: bool = False) -> dict:
         llm=None,
         dry_run=dry_run,
         enrich_relevant=True,
+        fetcher=lambda url: fetch_github_readme_text(url, token=github_token),
     )
 
 

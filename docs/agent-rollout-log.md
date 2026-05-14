@@ -656,3 +656,25 @@ DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
   .venv/bin/pytest tests/ -q
 → 123 passed
 ```
+
+### Slice 4 — GitHub README fetch (2026-05-14)
+
+* GitHub discovery enrichment now fetches README markdown through the
+  GitHub Contents API (`/repos/{owner}/{repo}/readme`) instead of
+  sending repository HTML to the LLM.
+* `fetch_github_readme_text` is token-aware and test-injectable; it
+  decodes base64 README content into `FetchResult` with source metadata
+  (`html_url`, `download_url`, `path`, `size`).
+
+Focused tests:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_discovery_sources.py \
+  tests/agent/test_discovery_tasks.py -v
+→ 10 passed
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 124 passed
+```
