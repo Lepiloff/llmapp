@@ -678,3 +678,45 @@ DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
   .venv/bin/pytest tests/ -q
 → 124 passed
 ```
+
+### Slice 5 — Phase 3 gate report (2026-05-14)
+
+* `apps.agent.reports.phase3_gate_report()` added as the canonical
+  Phase 3 → Phase 4 evidence rollup.
+* `manage.py agent_phase3_report [--json]` added for operators. It
+  reports LLM-generated RSS/GitHub apps, status split, approval rate,
+  total LLM cost, cost per published app, real/mock call counts, and
+  whether the production gate is open.
+* Source rows with `payload.agent_enrichment` are the source of truth for
+  "LLM-generated via RSS/GitHub", because those rows are written only
+  after `enrich_new_app` has produced a sanitized draft and
+  `persist_new_draft` has created/updated an `App`.
+* Gate opening is intentionally stricter than the bare count/rate: cost
+  basis must be complete (`llm_calls >= generated_apps`) and contain no
+  mock calls, otherwise cost-per-published is not production evidence.
+
+Focused tests:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/agent/test_phase3_report.py -q
+→ 2 passed
+```
+
+Current dev DB gate snapshot:
+
+```json
+{
+  "generated_apps": 0,
+  "published_apps": 0,
+  "approval_rate": "0.0",
+  "cost_per_published_usd": null,
+  "cost_basis_complete": false,
+  "gate_open": false
+}
+```
+
+**Phase 3 implementation is now complete. Phase 4 remains CLOSED until
+real RSS/GitHub production runs accumulate ≥ 20 LLM-generated apps,
+approval-to-published reaches ≥ 50%, and real cost per published app is
+measured.**
