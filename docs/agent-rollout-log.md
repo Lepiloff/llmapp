@@ -720,3 +720,27 @@ Current dev DB gate snapshot:
 real RSS/GitHub production runs accumulate ≥ 20 LLM-generated apps,
 approval-to-published reaches ≥ 50%, and real cost per published app is
 measured.**
+
+---
+
+## Phase 4 — Prerequisite link-checker fixes (2026-05-14)
+
+Before starting official-directory discovery or re-actualization, the two
+Phase 0 deferred link-checker issues were fixed:
+
+* `check_app_links_batch` now includes published apps where
+  `last_checked_at IS NULL`, so newly-published / never-checked apps are
+  not silently skipped. Null timestamps are ordered first.
+* Auto-deprecate for `official` / `install` link failures now fires at
+  **7** consecutive failures, matching `docs/business.md § 11.3` and
+  `docs/architecture.md § 11`, instead of the old 5-failure threshold.
+
+Focused tests:
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/sources/test_link_checker.py -q
+→ 2 passed
+```
+
+**Phase 4 prerequisite status: link-checker blocker cleared.**

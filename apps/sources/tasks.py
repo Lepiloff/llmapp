@@ -13,6 +13,7 @@ from datetime import timedelta
 
 import requests
 from celery import shared_task
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.catalog.models import App
@@ -22,6 +23,8 @@ from .models import LinkCheckResult, LinkHealth, UnparsedRegistryRecord
 from .upsert import upsert_app_from_draft
 
 logger = logging.getLogger(__name__)
+
+AUTO_DEPRECATE_FAILURE_THRESHOLD = 7
 
 
 @shared_task
@@ -83,8 +86,8 @@ def check_app_links_batch(batch_size: int = 50) -> dict[str, int]:
         cutoff = timezone.now() - timedelta(days=1)
         apps_to_check = (
             App.published.all()
-            .filter(last_checked_at__lt=cutoff)
-            .order_by("last_checked_at")[:batch_size]
+            .filter(Q(last_checked_at__lt=cutoff) | Q(last_checked_at__isnull=True))
+            .order_by(F("last_checked_at").asc(nulls_first=True))[:batch_size]
         )
 
         for app in apps_to_check:
@@ -178,7 +181,10 @@ def _update_link_health(app: App, target: str, url: str, ok: bool, status_code: 
             health.consecutive_failures += 1
             health.last_failed_at = timezone.now()
 
-            if health.consecutive_failures >= 5 and target in ("official", "install"):
+            if (
+                health.consecutive_failures >= AUTO_DEPRECATE_FAILURE_THRESHOLD
+                and target in ("official", "install")
+            ):
                 App.objects.filter(pk=app.pk).update(
                     launch_status=App.LaunchStatus.DEPRECATED
                 )
