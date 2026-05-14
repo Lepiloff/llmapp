@@ -38,6 +38,7 @@ class Source(models.Model):
     external_id = models.CharField(max_length=200, blank=True)
     payload = models.JSONField(default=dict, blank=True)
     fetched_at = models.DateTimeField(default=timezone.now)
+    last_enriched_at = models.DateTimeField(null=True, blank=True)
     is_primary = models.BooleanField(default=False)
     is_active = models.BooleanField(
         default=True,

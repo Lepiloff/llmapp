@@ -744,3 +744,33 @@ DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
 ```
 
 **Phase 4 prerequisite status: link-checker blocker cleared.**
+
+### Slice 1 — Source re-actualization metadata (2026-05-14)
+
+Prepared the storage surface for future re-actualization without enabling
+any Phase 4 automation:
+
+* `Source.last_enriched_at` added as nullable metadata.
+* Migration `sources.0005_source_last_enriched_at` backfills existing rows
+  with `last_enriched_at = fetched_at`.
+* Source admin now exposes `last_enriched_at` in list display / filters.
+
+Verification:
+
+```
+.venv/bin/python manage.py makemigrations --check --dry-run
+→ No changes detected
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/python manage.py migrate sources
+→ Applying sources.0005_source_last_enriched_at... OK
+
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/sources/test_source_model.py \
+  tests/sources/test_link_checker.py -q
+→ 3 passed
+```
+
+No discovery/re-actualization beat task was enabled; Phase 4 production
+automation remains blocked by the Phase 3 production gate and official
+directory ToS review.

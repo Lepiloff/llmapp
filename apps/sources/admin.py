@@ -9,8 +9,14 @@ from .models import Source, UnparsedRegistryRecord, LinkCheckResult, LinkHealth
 
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
-    list_display = ['app_name', 'source_type', 'external_id', 'is_primary', 'is_active', 'fetched_at']
-    list_filter = ['source_type', 'is_primary', 'is_active', 'fetched_at']
+    list_display = [
+        'app_name', 'source_type', 'external_id', 'is_primary', 'is_active',
+        'fetched_at', 'last_enriched_at',
+    ]
+    list_filter = [
+        'source_type', 'is_primary', 'is_active', 'fetched_at',
+        'last_enriched_at',
+    ]
     search_fields = ['app__name', 'external_id', 'source_url']
     readonly_fields = ['fetched_at']
 
