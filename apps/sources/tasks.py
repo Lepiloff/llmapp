@@ -19,7 +19,7 @@ from django.utils import timezone
 from apps.catalog.models import App
 
 from .mcp_registry import MCPRegistrySource
-from .models import LinkCheckResult, LinkHealth, UnparsedRegistryRecord
+from .models import LinkCheckResult, LinkHealth, Source, UnparsedRegistryRecord
 from .upsert import upsert_app_from_draft
 
 logger = logging.getLogger(__name__)
@@ -196,5 +196,61 @@ def _update_link_health(app: App, target: str, url: str, ok: bool, status_code: 
                         "consecutive_failures": health.consecutive_failures,
                     },
                 )
+                # Fire the vanish review event exactly when the count
+                # *crosses* the threshold. Subsequent same-failure
+                # increments keep auto-deprecating the App but must not
+                # spam the editor's queue. Recovery resets the counter,
+                # so a later vanish naturally fires a fresh event.
+                if health.consecutive_failures == AUTO_DEPRECATE_FAILURE_THRESHOLD:
+                    _record_vanished_source(
+                        app, target=target, url=url, status_code=status_code,
+                        consecutive_failures=health.consecutive_failures,
+                    )
 
         health.save()
+
+
+def _record_vanished_source(
+    app: App,
+    *,
+    target: str,
+    url: str,
+    status_code: int | None,
+    consecutive_failures: int,
+) -> None:
+    """Flip ``Source.is_active=False`` for the dead URL and queue a review.
+
+    The Source flip is precise — only rows whose own ``source_url``
+    equals the failing ``url`` get deactivated, so an app's other live
+    sources (e.g. a working GitHub repo when the official page broke)
+    stay discoverable. The queue entry tells the editor which target
+    broke so they can confirm or roll back the auto-deprecate.
+
+    NeedsReviewQueueEntry is a lazy local import to keep ``apps.sources``
+    importable without ``apps.agent`` (the agent app depends on sources;
+    a circular import would block migrations).
+    """
+    from apps.agent.models import NeedsReviewQueueEntry
+
+    deactivated = Source.objects.filter(
+        app=app, source_url=url, is_active=True
+    ).update(is_active=False)
+    NeedsReviewQueueEntry.objects.create(
+        app=app,
+        kind=NeedsReviewQueueEntry.Kind.VANISHED,
+        payload={
+            "target": target,
+            "url": url,
+            "status_code": status_code,
+            "consecutive_failures": consecutive_failures,
+            "auto_deprecated": True,
+            "sources_deactivated": deactivated,
+        },
+    )
+    logger.warning(
+        "source_vanish_review_queued",
+        extra={
+            "app_id": app.pk, "target": target,
+            "sources_deactivated": deactivated,
+        },
+    )
