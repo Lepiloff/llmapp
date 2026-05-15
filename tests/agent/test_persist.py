@@ -23,6 +23,7 @@ import pytest
 from apps.agent.llm.schemas import (
     CapabilityProposal,
     CategoryProposal,
+    EnrichedDraft,
     ListingTypeProposal,
     MergeSet,
 )
@@ -30,6 +31,8 @@ from apps.agent.llm.client import MockLLMProvider
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.agent.persist import (
     AppNotEligibleError,
+    _derive_platforms,
+    _enriched_to_app_draft,
     apply_merge_set,
     assert_app_is_eligible,
     build_app_snapshot,
@@ -657,3 +660,53 @@ def test_search_refresh_scheduled_on_use_case_addition(
     apply_merge_set(draft_app.pk, result)
 
     assert draft_app.pk in refresh_calls
+
+
+# ---------------------------------------------------------------------------
+# F5 — listing-type → platform inference for agent-discovered drafts.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("listing_slugs", "expected"),
+    [
+        (["mcp-server"], ["mcp"]),
+        (["chatgpt-app"], ["chatgpt"]),
+        (["claude-connector"], ["claude"]),
+        (["interactive-claude-app"], ["claude"]),
+        (["gemini-app"], ["gemini"]),
+        (["enterprise-agent"], ["enterprise"]),
+        # Two Claude-family listings collapse to a single Platform row.
+        (["claude-connector", "interactive-claude-app"], ["claude"]),
+        # Multiple distinct listing types yield multiple platforms in
+        # encounter order (deterministic for snapshot assertions).
+        (
+            ["mcp-server", "chatgpt-app", "gemini-app"],
+            ["mcp", "chatgpt", "gemini"],
+        ),
+        # Unknown listing type — Trigger.dev #12 case — yields no platform
+        # so the publish-checklist blocks until an editor sets one.
+        (["agent-platform"], []),
+        ([], []),
+    ],
+)
+def test_derive_platforms(listing_slugs, expected) -> None:
+    assert _derive_platforms(listing_slugs) == expected
+
+
+def test_enriched_to_app_draft_propagates_platforms_from_listing_types() -> None:
+    """The pure-Python translation must carry derived platforms onto AppDraft
+    so ``upsert_app_from_draft`` can attach AppPlatform rows on first persist.
+    Regression: F5 previously hard-coded ``mcp-server → mcp`` and dropped
+    every other listing-type's platform, blocking publish on Trigger.dev #12
+    plus any future non-MCP discovery target."""
+    enriched = EnrichedDraft(
+        name="Example ChatGPT App",
+        short_description="x",
+        listing_types=[
+            ListingTypeProposal(slug="chatgpt-app", confidence=0.95),
+        ],
+    )
+    draft = _enriched_to_app_draft(
+        enriched, external_id="ext-1", raw_payload={}
+    )
+    assert draft.platforms == ["chatgpt"]
+    assert draft.listing_types == ["chatgpt-app"]

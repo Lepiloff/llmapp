@@ -51,6 +51,40 @@ from apps.sources.upsert import upsert_app_from_draft
 logger = logging.getLogger(__name__)
 
 
+# Maps a ListingType slug (the LLM's "what kind of thing is this" call)
+# to the canonical Platform slug it belongs to. Listing types are what
+# the LLM can reliably classify from a README; Platform membership for
+# any real app is the editor's call (it requires checking the official
+# directory), so this mapping is only used to seed an initial Platform
+# row on agent-discovered DRAFTs. Two listing types map to `claude`
+# because both Claude Connectors and Interactive Claude Apps live under
+# the same Claude ecosystem on the catalog side.
+#
+# Listing-type slugs the LLM proposes but that aren't in this map (a
+# net-new shape the catalog doesn't have a Platform for yet) yield no
+# platform, leaving the DRAFT for editor review — exactly the Trigger.dev
+# #12 failure mode (workflow runtime, no MCP-server listing → empty
+# platforms → publish blocked, which is correct).
+_LISTING_TYPE_TO_PLATFORM: dict[str, str] = {
+    "chatgpt-app": "chatgpt",
+    "claude-connector": "claude",
+    "interactive-claude-app": "claude",
+    "mcp-server": "mcp",
+    "gemini-app": "gemini",
+    "enterprise-agent": "enterprise",
+}
+
+
+def _derive_platforms(listing_type_slugs: Iterable[str]) -> list[str]:
+    """Map proposed listing types to canonical Platform slugs (deduped)."""
+    seen: list[str] = []
+    for lt_slug in listing_type_slugs:
+        platform = _LISTING_TYPE_TO_PLATFORM.get(lt_slug)
+        if platform and platform not in seen:
+            seen.append(platform)
+    return seen
+
+
 class AppNotEligibleError(ValueError):
     """Raised when the agent is asked to enrich an App that doesn't qualify.
 
@@ -292,9 +326,9 @@ def _enriched_to_app_draft(
     external_id: str,
     raw_payload: dict,
 ) -> AppDraft:
-    platform_slugs = ["mcp"] if any(
-        lt.slug == "mcp-server" for lt in enriched.listing_types
-    ) else []
+    platform_slugs = _derive_platforms(
+        lt.slug for lt in enriched.listing_types
+    )
     return AppDraft(
         name=enriched.name,
         slug_hint=enriched.name,
