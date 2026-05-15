@@ -130,9 +130,9 @@ docker compose exec -T web python manage.py agent_phase3_report --json
 
 | # | Issue | Where | Impact |
 |---|---|---|---|
-| F1 | Anthropic provider not implemented | `apps/agent/llm/client.py:184` | Primary must be OpenAI; memory says Claude Sonnet expected |
+| F1 | Anthropic provider not implemented | `apps/agent/llm/client.py:184` | Deferred — prod release runs on OpenAI per operator policy |
 | F2 | OpenAI per-model cost vars unset | `.env` + `apps/agent/llm/client.py:451` | `cost_per_published_usd=$0.00`; budget tracking is blind |
-| F3 | `/apps/<category-slug>/` returns 404 | `apps/catalog/urls.py:22` registers detail before `config/urls.py:41` registers category | Category pages dead in public catalog |
+| F3 | ~~`/apps/<category-slug>/` returns 404~~ | ~~`apps/catalog/urls.py`~~ | **Closed in `8cc913a`** — single dispatcher view routes detail vs. category by slug lookup |
 | F4 | Host → docker-broker route | `redis` hostname unreachable from host venv | `--apply` from host needs `CELERY_TASK_ALWAYS_EAGER=True`; use container path instead |
 | F5 | `_enriched_to_app_draft` infers platform from `mcp-server` listing only | `apps/agent/persist.py:288-290` | DRAFTs without `mcp-server` listing get empty platforms and fail publish (e.g. Trigger.dev #12) |
 
@@ -361,11 +361,32 @@ Commit `fcd631f`.
 
 ---
 
+## Prod deploy hardening (2026-05-15) ✅
+
+Two prod-blockers landed in commit `5233f2f`:
+
+* `docker/entrypoint.sh` no longer falls back to a hardcoded
+  `admin / admin123` superuser. Bootstrap is opt-in: runs only when all
+  three of `DJANGO_SUPERUSER_USERNAME / _EMAIL / _PASSWORD` are set in
+  the environment; otherwise logs a skip notice and defers to
+  `manage.py createsuperuser`.
+* `config/settings/prod.py` reads `CSRF_TRUSTED_ORIGINS` from env via
+  `Csv()`. Required once the catalog sits behind
+  `llmappmarket.com + www` for any cross-origin form/XHR POST.
+* `.env.example` documents both keys.
+
+---
+
 ## Next plan (priority order)
 
 ### A. Quick ROI / close open findings
 
-1. **F2 — OpenAI per-model cost env vars.** Configure
+1. **F5 — Listing→platform inference.** Generalise
+   `_enriched_to_app_draft` to derive platforms from the LLM-proposed
+   listing types rather than hard-coding `mcp-server` → `mcp`. Or
+   accept a `platforms` field directly from the LLM (schema already
+   has one). Effort: ~30 min.
+2. **F2 — OpenAI per-model cost env vars.** Configure
    `AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS` /
    `..._OUTPUT_...` and the cheap-role pair. Wire role-aware lookup
    in `apps/agent/llm/client.py::build_provider`. Repopulate
@@ -373,21 +394,10 @@ Commit `fcd631f`.
    (multiplies tokens × configured price). Effort: ~30 min once prices
    in hand. Needs operator-provided prices for `gpt-5.4-mini` and
    `gpt-5.4-nano`.
-2. **F1 — Anthropic provider.** Mirror `OpenAIProvider`: structured
-   outputs via Anthropic SDK, prompt caching on the system prompt,
-   role-specific cost knobs. Add `tests/agent/test_llm_client.py`
-   parity tests. Effort: ~1-2 h. Unblocks the memory-noted
-   "primary = Claude Sonnet" setup.
-3. **F3 — Category route 404.** Swap the registration order in
-   `apps/catalog/urls.py`: register `apps/<slug:category_slug>/` (or
-   re-route) before the detail catch-all, or namespace detail under
-   `/apps/listing/<slug>/`. Add a regression test that hits
-   `/apps/developer-tools/` and expects 200. Effort: ~30 min.
-5. **F5 — Listing→platform inference.** Generalise
-   `_enriched_to_app_draft` to derive platforms from the LLM-proposed
-   listing types rather than hard-coding `mcp-server` → `mcp`. Or
-   accept a `platforms` field directly from the LLM (schema already
-   has one). Effort: ~30 min.
+3. **F1 — Anthropic provider. DEFERRED.** Operator policy: prod
+   release runs on OpenAI; Anthropic provider is post-prod. Note
+   retained so it isn't lost if the policy changes later.
+   `apps/agent/llm/client.py:184` still raises `NotImplementedError`.
 
 ### B. Phase 4 — re-actualization + official directories
 
