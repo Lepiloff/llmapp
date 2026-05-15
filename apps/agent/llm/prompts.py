@@ -132,9 +132,15 @@ def enrich_new_app_prompt(
         "URLs, capabilities, pricing, or launch status.\n"
         "2. Capabilities yes/no require short evidence. Otherwise use unknown.\n"
         "3. Use only allowed category, listing-type, and capability slugs.\n"
-        "4. Put any editorial one-liner in proposed_verdict; it is never "
-        "written directly to App.verdict.\n"
+        "4. ALWAYS provide a 1-2 sentence proposed_verdict that an editor "
+        "could paste as the public review. Cover what the listing does, "
+        "who it is for, and any notable trade-off. Leave empty ONLY if "
+        "the source text is genuinely insufficient to say anything. "
+        "It is never written directly to App.verdict.\n"
         "5. Keep short_description <= 280 characters.\n"
+        "6. use_cases: 3-7 short verb-led phrases derived from the source "
+        "text (e.g. 'compare dependency versions', 'audit POM upgrades'). "
+        "Use existing common phrasings when possible; new ones are fine.\n"
     )
     allowed = (
         f"Allowed platform slugs: {sorted(taxonomy.platform_slugs)}\n"

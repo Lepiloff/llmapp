@@ -33,6 +33,8 @@ class AppDraft:
     listing_types: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     capabilities: dict[str, str] = field(default_factory=dict)
+    capability_evidence: dict[str, str] = field(default_factory=dict)
+    use_cases: list[str] = field(default_factory=list)
     pricing_model: str = "unknown"
     launch_status: str = "live"
     external_id: str = ""

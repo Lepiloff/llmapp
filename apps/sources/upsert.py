@@ -23,6 +23,7 @@ from apps.catalog.models import (
     Category,
     ListingType,
     Platform,
+    UseCase,
 )
 
 from .base import AppDraft
@@ -121,21 +122,57 @@ def attach_categories(app: App, slugs: list[str]) -> None:
         app.categories.add(*categories)
 
 
-def attach_capabilities(app: App, capabilities: dict[str, str]) -> None:
+def attach_capabilities(
+    app: App,
+    capabilities: dict[str, str],
+    evidence: dict[str, str] | None = None,
+) -> None:
     """Ensure every known `Capability` has an `AppCapability` row.
 
     The invariant matters for the search facets: ``yes / no / unknown``
     counts must sum to the total app count. Without this, the "unknown"
     bucket would silently miss capabilities that were never assigned.
+
+    ``evidence`` (optional) carries the source quote backing each yes/no
+    value. Stored verbatim in ``AppCapability.note`` so the admin review
+    UI shows the LLM's justification next to the value.
     """
+    evidence = evidence or {}
     known = {c.key: c for c in Capability.objects.all()}
     for cap_key, cap_obj in known.items():
         value = capabilities.get(cap_key, AppCapability.CapabilityValue.UNKNOWN)
+        defaults = {"value": value}
+        cap_evidence = (evidence.get(cap_key) or "").strip()
+        if cap_evidence:
+            defaults["note"] = cap_evidence[:200]
         AppCapability.objects.update_or_create(
             app=app,
             capability=cap_obj,
-            defaults={"value": value},
+            defaults=defaults,
         )
+
+
+def attach_use_cases(app: App, titles: list[str]) -> None:
+    """Resolve free-text use-case labels to ``UseCase`` rows and attach.
+
+    Matches the merge-path behaviour
+    (``apps.agent.persist._apply_use_cases``): existing slugs are reused,
+    new ones get created on the fly. Slug collisions (different titles
+    that slugify to the same string) reuse the first existing row.
+    """
+    if not titles:
+        return
+    use_case_rows: list[UseCase] = []
+    seen_slugs: set[str] = set()
+    for title in titles:
+        slug = slugify(title)[:200] or "use-case"
+        if slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        row, _ = UseCase.objects.get_or_create(slug=slug, defaults={"title": title})
+        use_case_rows.append(row)
+    if use_case_rows:
+        app.use_cases.add(*use_case_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +263,8 @@ def _create_new_app(draft: AppDraft, source_type: str) -> UpsertOutcome:
     attach_platforms(app, draft)
     attach_listing_types(app, draft.listing_types)
     attach_categories(app, draft.categories)
-    attach_capabilities(app, draft.capabilities)
+    attach_capabilities(app, draft.capabilities, draft.capability_evidence)
+    attach_use_cases(app, draft.use_cases)
 
     Source.objects.create(
         app=app,

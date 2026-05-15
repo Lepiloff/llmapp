@@ -265,10 +265,17 @@ def persist_new_draft(
         external_id=external_id,
     ).select_related("app").first()
     if source and result is not None:
+        # Editors review the DRAFT before publishing; the LLM's
+        # proposed_verdict is the most editor-facing field of the
+        # enrichment. Fall back to scope_summary when verdict is empty
+        # so the admin always shows something concrete.
+        proposed_verdict = (enriched.proposed_verdict or "").strip() or (
+            enriched.scope_summary or ""
+        ).strip()
         payload = {
             **(source.payload or {}),
             "agent_enrichment": result.as_dict(),
-            "proposed_verdict": enriched.proposed_verdict,
+            "proposed_verdict": proposed_verdict,
             "scope_summary": enriched.scope_summary,
         }
         Source.objects.filter(pk=source.pk).update(payload=payload)
@@ -305,6 +312,12 @@ def _enriched_to_app_draft(
             key: proposal.value
             for key, proposal in enriched.capabilities.items()
         },
+        capability_evidence={
+            key: proposal.evidence
+            for key, proposal in enriched.capabilities.items()
+            if proposal.evidence
+        },
+        use_cases=list(enriched.use_cases),
         pricing_model=enriched.pricing_model,
         launch_status=enriched.launch_status,
         external_id=external_id,
