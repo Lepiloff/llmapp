@@ -54,6 +54,19 @@ def home(request: HttpRequest) -> HttpResponse:
     )
 
 
+def app_or_category_detail(request: HttpRequest, slug: str) -> HttpResponse:
+    """Dispatch /apps/<slug>/ between Category page and App detail.
+
+    Categories are an admin-curated closed set, so they take precedence on
+    a slug collision; this matches `Category.get_absolute_url` and
+    `App.get_absolute_url` both returning `/apps/<slug>/`. Falls through to
+    App detail (which raises 404 itself when no published App matches).
+    """
+    if Category.objects.filter(slug=slug).exists():
+        return category_page(request, category_slug=slug)
+    return app_detail(request, slug=slug)
+
+
 def app_detail(request: HttpRequest, slug: str) -> HttpResponse:
     """Single app page (docs/business.md § 7.3)."""
     app = get_object_or_404(

@@ -1,10 +1,12 @@
 """Catalog URLs.
 
 The faceted `/apps/` list lives in `apps.search.urls`; this module owns the
-static slices (home, detail, platform/category/cross pages).
+home page and the lazy-loaded "newly added" HTMX strip.
 
-The order of `path()` entries matters: detail's `<slug:slug>` would shadow
-`<slug:category_slug>` if registered first, so detail is wired last.
+The detail/category dispatcher at `/apps/<slug>/` is registered in
+`config/urls.py` because it has to coexist with other top-level routes
+(`/apps/`, `/<platform>/`, `/<platform>/<category>/`) whose ordering
+matters for URL resolution.
 """
 from __future__ import annotations
 
@@ -17,7 +19,4 @@ app_name = "catalog"
 urlpatterns = [
     path("", views.home, name="home"),
     path("apps/newly-added/", views.newly_added, name="newly_added"),
-    # /apps/<category_slug>/ is registered in config/urls.py with an explicit
-    # path so the detail route below stays unambiguous when slugs collide.
-    path("apps/<slug:slug>/", views.app_detail, name="detail"),
 ]

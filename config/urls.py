@@ -38,7 +38,9 @@ urlpatterns = [
     # All specific routes must be BEFORE the catch-all platform pattern!
     path('search/', include('apps.search.urls')),
     path('apps/', search_views.app_search, name='apps_search'),
-    path('apps/<slug:category_slug>/', catalog_views.category_page, name='category_page'),
+    # Single dispatcher: Category wins on slug collision, falls back to App detail.
+    # See apps.catalog.views.app_or_category_detail.
+    path('apps/<slug:slug>/', catalog_views.app_or_category_detail, name='catalog_item'),
     path('submit/', include('apps.submissions.urls')),
     path('blog/', include('apps.editorial.urls')),
     path('newsletter/', include('apps.newsletter.urls')),
