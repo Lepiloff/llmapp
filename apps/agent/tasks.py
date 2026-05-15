@@ -31,12 +31,16 @@ from apps.agent.persist import (
     AppNotEligibleError,
     NewDraftPersistResult,
     PersistResult,
+    ReactualizationPersistResult,
     apply_merge_set,
     assert_app_is_eligible,
     build_app_snapshot,
     build_taxonomy_snapshot,
     pending_enrichment_app_ids,
+    pending_reactualization_app_ids,
     persist_new_draft,
+    pick_primary_active_source,
+    queue_reactualization,
     record_llm_call,
 )
 from apps.agent.pipeline.enrich import (
@@ -44,6 +48,10 @@ from apps.agent.pipeline.enrich import (
     NewAppEnrichmentResult,
     enrich_existing_draft,
     enrich_new_app,
+)
+from apps.agent.pipeline.reactualize import (
+    ReactualizationDiff,
+    compute_reactualization,
 )
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
@@ -59,6 +67,34 @@ logger = logging.getLogger(__name__)
 SOURCE_FLAG_ENRICH_PENDING = "enrich_pending"
 SOURCE_FLAG_RSS = "rss"
 SOURCE_FLAG_GITHUB_MCP = "github_mcp"
+
+
+def _fetcher_for_source(source) -> "Callable[[str], FetchResult]":
+    """Pick the right URL fetcher for a Source row.
+
+    GitHub MCP sources need the README-via-API fetcher because their
+    canonical URL is a repo home page that doesn't return the README
+    text in raw HTML. Everything else uses ``fetch_url_text``.
+    """
+    if source.source_type == Source.SourceType.GITHUB_MCP:
+        github_token = getattr(settings, "GITHUB_TOKEN", "")
+        return lambda url: fetch_github_readme_text(url, token=github_token)
+    return fetch_url_text
+
+
+def _source_fetch_url(source) -> str:
+    """Best URL to re-fetch a Source from.
+
+    Prefer the explicit ``source_url`` column; fall back to the
+    discovery payload's canonical URL (Phase 3 sources stored that
+    under ``payload.fetch.url``). The orchestrator skips the app if
+    neither produces a non-empty URL.
+    """
+    if source.source_url:
+        return source.source_url
+    payload = source.payload or {}
+    fetch_block = payload.get("fetch") or {}
+    return fetch_block.get("url") or payload.get("source_url") or ""
 
 
 @dataclass
@@ -641,3 +677,228 @@ def send_review_queue_digest() -> dict:
         "by_kind": by_kind,
         "by_source": by_source,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — re-actualization orchestration
+# ---------------------------------------------------------------------------
+@dataclass
+class ReactualizeOutcome:
+    """High-level result for one ``run_reactualize_app`` invocation."""
+
+    run_id: int
+    task_id: int
+    diff: ReactualizationDiff | None
+    persist: ReactualizationPersistResult | None
+    dry_run: bool
+    skipped_reason: str = ""
+
+
+def run_reactualize_app(
+    app_id: int,
+    *,
+    llm: LLMProvider | None = None,
+    fetcher=None,
+    dry_run: bool = False,
+    trigger: str = AgentRun.Trigger.MANUAL,
+    triggered_by: str = "",
+    run: AgentRun | None = None,
+) -> ReactualizeOutcome:
+    """Re-run enrichment on a published App and queue any drift for review.
+
+    Owns the full pipeline for one App:
+      1. Pick the freshest active re-actualizable Source.
+      2. Re-fetch its URL with the per-source-type fetcher.
+      3. ``enrich_new_app`` produces a fresh ``EnrichedDraft``.
+      4. ``compute_reactualization`` diffs against the App's snapshot.
+      5. ``queue_reactualization`` writes ``NeedsReviewQueueEntry`` and
+         refreshes ``Source.last_enriched_at`` / ``payload``.
+
+    Never modifies App fields — that contract lives in
+    :func:`apps.agent.persist.queue_reactualization`. ``dry_run`` skips
+    only the persist step; the AgentRun / EnrichmentTask / LLMCallLog
+    audit rows are written regardless so operators see exactly what was
+    proposed during a dry probe.
+    """
+    owns_run = run is None
+    if run is None:
+        run = AgentRun.objects.create(
+            source_type="agent_reactualize",
+            status=AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.RUNNING,
+            trigger=trigger,
+            triggered_by=triggered_by[:120],
+        )
+    task = EnrichmentTask.objects.create(
+        run=run,
+        app_id=app_id,
+        status=EnrichmentTask.Status.FETCHING,
+    )
+
+    def _finalize(*, status, diff, persist, skipped_reason="", cost=0.0):
+        task.diff_summary = (
+            diff.as_dict() if diff is not None else {"skipped": skipped_reason}
+        )
+        task.status = status
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "diff_summary", "finished_at"])
+        if owns_run:
+            run.status = (
+                AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.SUCCEEDED
+            )
+            run.stats = {
+                "apps_processed": 1,
+                "queue_entries": int(bool(persist and persist.queue_entry_id)),
+                "skipped": int(bool(skipped_reason)),
+            }
+            run.total_cost_usd = cost
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "stats", "total_cost_usd", "finished_at"])
+        return ReactualizeOutcome(
+            run_id=run.pk, task_id=task.pk, diff=diff,
+            persist=persist, dry_run=dry_run, skipped_reason=skipped_reason,
+        )
+
+    try:
+        source = pick_primary_active_source(app_id)
+        if source is None:
+            return _finalize(
+                status=EnrichmentTask.Status.SKIPPED,
+                diff=None, persist=None,
+                skipped_reason="no_active_reactualizable_source",
+            )
+
+        url = _source_fetch_url(source)
+        if not url:
+            return _finalize(
+                status=EnrichmentTask.Status.SKIPPED,
+                diff=None, persist=None,
+                skipped_reason="source_has_no_url",
+            )
+
+        active_fetcher = fetcher or _fetcher_for_source(source)
+        fetched = active_fetcher(url)
+        if not isinstance(fetched, FetchResult):
+            raise TypeError("fetcher must return apps.agent.pipeline.fetch.FetchResult")
+
+        task.status = EnrichmentTask.Status.ENRICHING
+        task.save(update_fields=["status"])
+
+        llm = llm or build_provider("primary")
+        taxonomy = build_taxonomy_snapshot()
+        result = enrich_new_app([fetched], taxonomy, llm)
+        record_llm_call(task, result.call_meta)
+
+        snapshot = build_app_snapshot(app_id)
+        diff = compute_reactualization(snapshot, result.sanitized_draft)
+
+        persist: ReactualizationPersistResult | None = None
+        if dry_run:
+            status = EnrichmentTask.Status.DRY_RUN
+        else:
+            persist = queue_reactualization(
+                diff,
+                source_id=source.pk,
+                enrichment_task=task,
+                raw_fetch_payload={
+                    "url": url,
+                    "source_type": source.source_type,
+                    "fetch": fetched.raw_payload,
+                },
+            )
+            status = EnrichmentTask.Status.PERSISTED
+        return _finalize(
+            status=status, diff=diff, persist=persist,
+            cost=float(result.call_meta.cost_usd),
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "agent_reactualize_failed",
+            extra={"app_id": app_id, "task_id": task.pk},
+        )
+        task.status = EnrichmentTask.Status.FAILED
+        task.error = str(exc)[:2000]
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "error", "finished_at"])
+        if owns_run:
+            run.status = AgentRun.Status.FAILED
+            run.error = str(exc)[:2000]
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at"])
+        raise
+
+
+@shared_task
+def reactualize_apps_batch(
+    limit: int | None = None,
+    *,
+    dry_run: bool = False,
+    interval_days: int | None = None,
+) -> dict:
+    """Daily beat: re-actualize a bounded batch of overdue apps.
+
+    Gated by ``AGENT_REACTUALIZATION_ENABLED`` so the schedule entry can
+    sit in code without firing on dev / staging until an operator
+    explicitly opts in. ``dry_run=True`` bypasses the flag for manual
+    probes (mirrors the discovery-task convention).
+    """
+    if not dry_run and not getattr(
+        settings, "AGENT_REACTUALIZATION_ENABLED", False
+    ):
+        return {"skipped": "reactualization_disabled"}
+
+    limit = limit or int(getattr(settings, "AGENT_REACTUALIZATION_BATCH_SIZE", 20))
+    interval = interval_days or int(
+        getattr(settings, "AGENT_REACTUALIZATION_INTERVAL_DAYS", 30)
+    )
+
+    run = AgentRun.objects.create(
+        source_type="agent_reactualize_batch",
+        status=AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.RUNNING,
+        trigger=AgentRun.Trigger.BEAT,
+    )
+    counters = {"processed": 0, "queued": 0, "skipped": 0, "failed": 0}
+    total_cost = 0.0
+    try:
+        app_ids = pending_reactualization_app_ids(
+            interval_days=interval, limit=limit
+        )
+        for app_id in app_ids:
+            try:
+                outcome = run_reactualize_app(
+                    app_id, dry_run=dry_run, run=run
+                )
+            except Exception:
+                counters["failed"] += 1
+                continue
+            counters["processed"] += 1
+            if outcome.skipped_reason:
+                counters["skipped"] += 1
+                continue
+            if outcome.persist and outcome.persist.queue_entry_id:
+                counters["queued"] += 1
+
+        # Sum cost via LLMCallLog aggregate so we don't double-track:
+        # each EnrichmentTask write hits LLMCallLog already, and the
+        # batch-level run row is the canonical place for the aggregate.
+        from django.db.models import Sum as _Sum
+        from apps.agent.models import LLMCallLog as _LLMCallLog
+        total_cost = float(
+            _LLMCallLog.objects.filter(task__run=run).aggregate(
+                s=_Sum("cost_usd")
+            )["s"] or 0
+        )
+
+        run.status = AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.SUCCEEDED
+        run.stats = counters
+        run.total_cost_usd = total_cost
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "stats", "total_cost_usd", "finished_at"])
+        return counters
+    except Exception as exc:
+        logger.exception("agent_reactualize_batch_failed", extra={"run_id": run.pk})
+        run.status = AgentRun.Status.FAILED
+        run.error = str(exc)[:2000]
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "error", "finished_at"])
+        raise

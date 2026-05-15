@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Iterable
 
 from django.db import transaction
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -816,3 +818,72 @@ def pending_enrichment_app_ids(limit: int | None = None) -> Iterable[int]:
     if limit is not None:
         qs = qs[:limit]
     return list(qs)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — selectors for re-actualization
+# ---------------------------------------------------------------------------
+# Source types we know how to re-fetch. New discovery sources must
+# opt in here once they have a deterministic fetch path. MANUAL is
+# excluded — editor-curated cards aren't an agent's job to re-actualize.
+_REACTUALIZABLE_SOURCE_TYPES: tuple[str, ...] = (
+    Source.SourceType.MCP_REGISTRY,
+    Source.SourceType.AGENT_ENRICH,
+    Source.SourceType.RSS_DISCOVERY,
+    Source.SourceType.GITHUB_MCP,
+)
+
+
+def pending_reactualization_app_ids(
+    *, interval_days: int, limit: int | None = None
+) -> list[int]:
+    """Published apps whose freshest re-actualizable Source is overdue.
+
+    "Overdue" = the source has either never been LLM-enriched
+    (``last_enriched_at IS NULL``) or its last enrichment is older than
+    ``interval_days`` ago. Apps with no re-actualizable active source
+    are excluded — we only check in on cards we know how to re-fetch.
+
+    Ordered NULLS FIRST so the never-enriched cards drain ahead of the
+    long-tail of refresh cycles. Stable PKs let callers run the same
+    selector twice without missing the freshly-enriched ones.
+    """
+    cutoff = timezone.now() - timedelta(days=interval_days)
+    qs = (
+        App.published.filter(
+            sources__is_active=True,
+            sources__source_type__in=_REACTUALIZABLE_SOURCE_TYPES,
+        )
+        .filter(
+            Q(sources__last_enriched_at__isnull=True)
+            | Q(sources__last_enriched_at__lt=cutoff),
+        )
+        .distinct()
+        .order_by(F("sources__last_enriched_at").asc(nulls_first=True))
+        .values_list("pk", flat=True)
+    )
+    if limit is not None:
+        qs = qs[:limit]
+    return list(qs)
+
+
+def pick_primary_active_source(
+    app_id: int,
+) -> Source | None:
+    """Return the source row a re-actualization run should re-fetch from.
+
+    Strategy: most recently fetched active row in the re-actualizable
+    allowlist. ``is_primary`` is honored as a soft tie-breaker — the
+    editor can flip the flag to direct re-actualization at a specific
+    Source — but we don't require it because most discovery rows leave
+    it false.
+    """
+    return (
+        Source.objects.filter(
+            app_id=app_id,
+            is_active=True,
+            source_type__in=_REACTUALIZABLE_SOURCE_TYPES,
+        )
+        .order_by("-is_primary", "-fetched_at")
+        .first()
+    )

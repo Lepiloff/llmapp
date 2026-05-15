@@ -248,6 +248,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.discover_github_mcp",
         "schedule": crontab(day_of_week="mon,wed,fri", hour=6, minute=30),
     },
+    "agent_reactualize_apps_batch": {
+        "task": "apps.agent.tasks.reactualize_apps_batch",
+        "schedule": crontab(hour=7, minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -379,6 +383,20 @@ AGENT_SOURCES_ENABLED = config(
     "AGENT_SOURCES_ENABLED", default="", cast=Csv()
 ) or []
 GITHUB_TOKEN = config("GITHUB_TOKEN", default="")
+
+# Phase 4 re-actualization cadence. Apps whose freshest re-actualizable
+# Source is older than this many days (or never enriched) are eligible
+# for the daily reactualize beat. AGENT_REACTUALIZATION_ENABLED gates
+# the beat itself — set to True before enabling the schedule entry.
+AGENT_REACTUALIZATION_ENABLED = config(
+    "AGENT_REACTUALIZATION_ENABLED", default=False, cast=bool
+)
+AGENT_REACTUALIZATION_INTERVAL_DAYS = config(
+    "AGENT_REACTUALIZATION_INTERVAL_DAYS", default=30, cast=int
+)
+AGENT_REACTUALIZATION_BATCH_SIZE = config(
+    "AGENT_REACTUALIZATION_BATCH_SIZE", default=20, cast=int
+)
 
 # ---------------------------------------------------------------------------
 # Project paths
