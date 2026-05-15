@@ -774,3 +774,360 @@ DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
 No discovery/re-actualization beat task was enabled; Phase 4 production
 automation remains blocked by the Phase 3 production gate and official
 directory ToS review.
+
+---
+
+## Phase 3 — Controlled real pilot (2026-05-14)
+
+First end-to-end real-LLM pilot of the discovery pipeline against
+production-like inputs. Goal: confirm that RSS + GitHub discovery, cheap
+classification, primary enrichment, validation, and DRAFT persistence all
+work against real OpenAI calls — not a gate run.
+
+### Setup
+
+* `.env` updates: `AGENT_LLM_PROVIDER_CHEAP=openai`,
+  `AGENT_LLM_MODEL_CHEAP=gpt-5.4-nano`; primary stays
+  `openai`/`gpt-5.4-mini`. `GITHUB_TOKEN` added (search rate-limit lift
+  from 10 req/min unauth → 30 req/min authed; repo content reads use the
+  5000 req/h limit).
+* Run host: `.venv/bin/python manage.py …` against the dev Postgres
+  (`127.0.0.1:5432`). Container image is pre-Phase-3 and was not used.
+  Celery scheduler bypassed via `CELERY_TASK_ALWAYS_EAGER=True` for the
+  `--apply` command, because the host venv has no route to the docker
+  internal Redis hostname `redis` from `transaction.on_commit` →
+  `refresh_search_vector_task.delay`. The eager path uses the same
+  refresh code; it does not change persisted state.
+
+### Commands and outcomes
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `agent_run --source=rss --limit=3` (dry) | `seen=3 relevant=0 persisted=0` — 3 OpenAI blog/Academy posts correctly classified as non-product |
+| 2 | `agent_run --source=github_mcp --limit=3` (dry) | `seen=3 relevant=2 persisted=0` — 2 MCP-adjacent repos flagged relevant |
+| 3 | `AGENT_SOURCES_ENABLED=rss,github_mcp agent_run --source=rss --limit=3 --apply` | `seen=3 relevant=0 persisted=0` — same feed, no relevant items |
+| 4 | `AGENT_SOURCES_ENABLED=rss,github_mcp CELERY_TASK_ALWAYS_EAGER=True agent_run --source=github_mcp --limit=3 --apply` | `seen=3 relevant=1 persisted=1` — App #8 `maven-tools-mcp-server` created |
+| 5 | `agent_phase3_report` | gate **CLOSED**: `generated_apps=1 published=0 approval_rate=0.0% cost_basis_complete=yes real_llm_calls=1` |
+
+LLM-call totals over the pilot:
+
+* 9 cheap classifications via `gpt-5.4-nano` (`discover-v1.0` prompt),
+  prompt sizes 256-317 tokens, outputs 72-117 tokens. All `is_mock=False`.
+* 1 primary enrichment via `gpt-5.4-mini` (`enrich-new-v1.0` prompt),
+  3641/634 in/out tokens, 4406 ms. `is_mock=False`.
+
+### Hard-constraint audit (App #8)
+
+| Field | Expected | Observed |
+|---|---|---|
+| `status` | `draft` | `draft` |
+| `editorial_review_status` | `unreviewed` | `unreviewed` |
+| `developer_claim_status` | `unclaimed` | `unclaimed` |
+| `platform_verification_status` | not `official` | `unknown` |
+| `verdict` | empty string | `""` |
+| Published-app `updated_at` since pilot start | 0 rows | 0 rows |
+| Source row | one `github_mcp` row, `payload.agent_enrichment` present | confirmed |
+
+DRAFT taxonomy population (real LLM output): categories
+`['developer-tools']`, platforms `['mcp']`, listing_types `['mcp-server']`,
+use_cases `[]` (slug-mismatch — see findings), 8 capabilities written
+(read_data=yes, write_actions=yes, interactive_ui=no, auth_required=unknown,
+local_setup_required=yes, remote_available=yes, open_source=yes,
+api_available=yes).
+
+### Findings (not gate blockers, but to fix before scaling)
+
+1. **`AppCapability.note` empty for new-app path.**
+   `apps/sources/upsert.py::attach_capabilities` writes only `value`,
+   never `note`. The merge path
+   (`apps/agent/persist.py::_apply_capability_updates`) does write
+   `note=evidence[:200]`. So the evidence-on-row invariant only holds for
+   the merge (existing-draft) path; new discovery-created DRAFTs have
+   evidence in `Source.payload.agent_enrichment.sanitized_draft.
+   capabilities.<key>.evidence` but not on the `AppCapability` row.
+   Acceptance criterion #5 is satisfied (evidence is in `Source.payload`),
+   but the admin review UI cannot show it next to each capability without
+   joining back to the Source row. Worth aligning the two paths.
+
+2. **`use_cases` dropped on persist.** The LLM returned 5 use cases as
+   free-text strings (`"dependency version checks"`, etc.).
+   `upsert_app_from_draft` expects them as slugs that already exist in the
+   `UseCase` table; unknown slugs silently never attach. Either the
+   prompt should require existing slugs, or the persist layer should
+   `get_or_create(slug=slugify(label))` for new-app drafts so the LLM's
+   free-text use cases are not lost.
+
+3. **Cost reads $0 across the pilot.** No
+   `AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS` /
+   `AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS` env vars are set, so
+   `OpenAIProvider` writes `cost_usd=0` for every call. The Phase 3 gate
+   report says `cost_basis_complete=yes` (count check passes) but
+   `cost_per_published_usd=null` — the cost dimension of the gate is
+   unmeasured. These env vars need to be configured with the real
+   gpt-5.4-mini / gpt-5.4-nano price points before the gate evidence is
+   meaningful.
+
+4. **`proposed_verdict` came back empty.** The primary enrichment
+   produced `proposed_verdict=""` for App #8, so nothing routes to the
+   review queue from this card. Likely the prompt allows the model to
+   skip the field; for editor visibility it's worth either making
+   `proposed_verdict` mandatory in the prompt or surfacing the LLM
+   `scope_summary` as the default review-queue payload.
+
+5. **`AGENT_SOURCES_ENABLED` is the only thing standing between dry-run
+   and apply.** Confirmed: `agent_run --source=… --apply` without
+   `AGENT_SOURCES_ENABLED` containing the source no-ops at
+   `_run_discovery_batch` (per
+   `apps/agent/tasks.py:430`). The pilot used a process-scoped env
+   override rather than editing `.env`, so the flag stays empty at rest.
+
+6. **Celery-from-host gap.** `apps/catalog/signals.py` schedules
+   `refresh_search_vector_task.delay()` via `transaction.on_commit`,
+   which fails when the broker hostname `redis` is not resolvable from
+   the host venv. Two ways out: (a) expose redis on the docker host port
+   for local runs, or (b) always run `--apply` inside the container.
+   For ad-hoc operator runs the `CELERY_TASK_ALWAYS_EAGER=True` override
+   used here is acceptable; for any scheduled production-style run the
+   container path should be the default.
+
+### Status after pilot
+
+* **Pipeline mechanics work end-to-end against real OpenAI.** Discovery
+  classification, candidate fetch (GitHub README via Contents API),
+  EnrichedDraft generation, validation, persistence, and audit-trail
+  rows all behave as designed.
+* **Phase 3 → Phase 4 gate stays CLOSED.** Only 1 LLM-generated DRAFT
+  (target ≥ 20); approval rate 0% (no editor reviews yet); cost
+  not measured.
+* **Next data-collection slice** to push toward the gate:
+  - Configure `AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS` and
+    `AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS` so cost is real.
+  - Fix `use_cases` slug-creation path (Finding #2) before another
+    apply run — otherwise every new DRAFT loses its use cases.
+  - Run `agent_run --source=github_mcp --apply` at `limit=20-40` to
+    accumulate ≥ 20 real DRAFTs.
+  - Have an editor walk the review queue and call
+    `review_acceptance_stats(days=30)` to measure acceptance rate.
+  - Re-run `agent_phase3_report` for the real cost-per-published number
+    once a handful of those DRAFTs reach `published`.
+
+### Slice 7 — Fix findings #1, #2, #4 from pilot and re-test (2026-05-14)
+
+Targeted code fixes for the discrepancies the pilot surfaced, then a
+second mini-pilot to confirm the new behaviour.
+
+**Fixes**
+
+* `apps/sources/base.py` — `AppDraft` now carries
+  `capability_evidence: dict[str, str]` and `use_cases: list[str]` so
+  the LLM's per-capability quote and free-text use-case labels survive
+  the trip from `EnrichedDraft` to the catalog.
+* `apps/sources/upsert.py::attach_capabilities` now accepts an
+  `evidence` dict and writes `note=evidence[key][:200]` for every
+  capability that came with a quote. The merge path (`apps/agent/
+  persist.py::_apply_capability_updates`) already did this; new-app
+  discovery is now aligned.
+* `apps/sources/upsert.py::attach_use_cases` (new) — resolves free-text
+  use-case labels to `UseCase` rows via `get_or_create(slug=slugify
+  (title), defaults={"title": title})`, exactly mirroring the merge
+  path. Called from `_create_new_app`.
+* `apps/agent/persist.py::_enriched_to_app_draft` populates both new
+  draft fields from `EnrichedDraft.capabilities[*].evidence` and
+  `EnrichedDraft.use_cases`.
+* `apps/agent/persist.py::persist_new_draft` falls back to
+  `scope_summary` for `Source.payload['proposed_verdict']` when the
+  LLM left it empty — so the admin/queue always has a non-empty
+  editor-facing line.
+* `apps/agent/llm/prompts.py::enrich_new_app_prompt` tightened: rule #4
+  now requires a 1-2 sentence `proposed_verdict`; rule #6 (new) tells
+  the model to emit 3-7 verb-led use-case phrases.
+* Finding #3 (per-model cost env vars) intentionally skipped per
+  operator instruction; cost stays $0 until prices are configured.
+
+**Tests**
+
+```
+DATABASE_URL=postgres://llmmarket:llmmarket@127.0.0.1:5432/llmmarket \
+  .venv/bin/pytest tests/ -q
+→ 129 passed
+```
+
+**Re-test commands**
+
+Clean DB first: deleted App #7 + App #8 (leftover DRAFTs from the
+first-pilot apply runs) and wiped `AgentRun`/`EnrichmentTask`/
+`LLMCallLog` to start the retest from zero agent state. The earlier
+"failed apply" actually committed the App row before the celery
+broker-from-host error tripped `transaction.on_commit`, which is why
+the cleanup needed a second pass (the source's payload didn't have
+`agent_enrichment` because that update happens *after* upsert).
+
+| # | Command | Result |
+|---|---|---|
+| 1 | `agent_run --source=rss --limit=3` (dry) | `seen=3 relevant=0 persisted=0` |
+| 2 | `agent_run --source=github_mcp --limit=3` (dry) | `seen=3 relevant=1 skipped_existing=1 persisted=0` |
+| 3 | `… --source=rss --limit=3 --apply` (env: sources enabled, eager celery) | `seen=3 relevant=0 persisted=0` |
+| 4 | `… --source=github_mcp --limit=3 --apply` | `seen=3 relevant=3 persisted=3` — Apps #9, #10, #11 created |
+| 5 | `agent_phase3_report` | `generated_apps=3 draft=3 approval_rate=0.0 real_llm_calls=3 mock=0 gate=CLOSED` |
+
+**Per-app verification of the fixes**
+
+| App | Capability evidence (yes/no with `note`) | Use-cases attached | proposed_verdict chars | App.verdict |
+|---|---|---|---|---|
+| #9 `forgemax` | 7/7 ✅ | 6 ✅ | 309 ✅ | `""` ✅ |
+| #10 `mcp-tools-py` | 7/7 ✅ | 6 ✅ | 279 ✅ | `""` ✅ |
+| #11 `gram` | 6/6 ✅ | 6 ✅ | 295 ✅ | `""` ✅ |
+
+Sample evidence captured on `AppCapability.note` for App #9
+`forgemax` (truncated):
+
+| Capability | Value | Note |
+|---|---|---|
+| read_data | yes | "Forgemax acts as a gateway exposing search/execute tools that operate over connected MCP servers" |
+| api_available | yes | "The README documents the MCP protocol surface and execute_tool endpoint" |
+| open_source | yes | "Repository hosted on GitHub with an Apache-2.0 license badge" |
+| interactive_ui | no | "No interactive UI is provided; communication is via MCP protocol clients" |
+
+Sample use-case slugs created on the fly:
+`chain-tool-calls-in-one-execution`,
+`discover-downstream-tools`,
+`orchestrate-connected-mcp-servers`,
+`read-mcp-resources`,
+`reduce-schema-bloat`,
+`run-javascript-against-mcp-tools`.
+
+**Hard-constraint audit (all 3 apps)**
+
+* `status=draft` for every agent-created App.
+* `editorial_review_status=unreviewed` for every agent-created App.
+* `App.verdict=""` for every agent-created App.
+* `App.published.filter(updated_at__gte=phase3_pilot_start).count() == 0`.
+
+**Status**
+
+Findings #1, #2, #4 from the prior pilot are resolved with regression
+tests still green. Finding #3 (real per-model cost) and Finding #5
+(host→broker route) remain open. Phase 3 gate is still CLOSED on
+volume + editorial signal — three real DRAFTs are not twenty, no
+editor reviews have been performed, and cost stays $0 until pricing
+env vars are populated.
+
+### Slice 8 — Docker rebuild, editor approval pass, demo-data cleanup (2026-05-15)
+
+**Docker image rebuilt.** `docker compose build web worker beat` and
+`docker compose up -d` brought the running container in line with the
+host code (pre-rebuild image was missing `apps/agent/sources/` and the
+last sources migration). `/health/` reports
+`{"db": true, "redis": true, "pg_trgm": true}` after the rebuild.
+
+**Admin verification via Playwright.** Logged in to
+`/admin/` as `admin/admin123`, then exercised the relevant Phase 3
+pages headlessly (screenshots under `/tmp/llmmarket-admin-*.png`):
+
+| URL | Status | Rows / observation |
+|---|---|---|
+| `/admin/catalog/app/?status__exact=draft` | 200 | 3 rows (Gram, MCP Tools Py, Forgemax) |
+| `/admin/catalog/app/9/change/` | 200 | Forgemax — categories, platforms, capabilities-with-`note` (evidence), 6 use_cases, publish checklist sidebar all populated |
+| `/admin/sources/source/?source_type__exact=github_mcp` | 200 | 3 rows |
+| `/admin/agent/agentrun/` | 200 | 2 rows (rss_discovery + github_mcp APPLY runs) |
+| `/admin/agent/llmcalllog/` | 200 | 9 rows, all `provider=openai`, `is_mock=False` |
+| `/admin/agent/needsreviewqueueentry/` | 200 | 0 rows (Phase 3 new-app path doesn't write to the queue — by design) |
+
+**Editor approval pass.** All three DRAFTs cleared the technical
+publish checklist (`apps/catalog/services.py::get_publish_checklist`)
+on first read. The only blocking fields were the two an editor must
+set: `editorial_review_status` and `platform_verification_status`.
+The agent's `not_listed` is the correct value for github-discovered
+listings (per business.md § 6.5 the `official` flag is reserved for
+the four directory sources).
+
+Inside the rebuilt container:
+
+```
+... For Forgemax / MCP Tools Py / Gram:
+[OK] short_description ≥ 60 chars
+[OK] at least one platform
+[OK] at least one category
+[OK] ≥ 3 explicit capabilities
+[OK] official_page_url or install_url
+[OK] editorial_review_status = reviewed
+[OK] platform_verification_status is set
+-> PUBLISHED  status=published quality_score=60
+```
+
+`recalc_quality_score` returned `60/100` for all three; the missing
+points are claim verification, badge URL, and editorial verdict —
+which remain editor-only fields.
+
+**Phase 3 report after the approval pass:**
+
+```
+Phase 3 -> Phase 4 gate: CLOSED
+Generated RSS/GitHub apps: 3 (draft=0, published=3, hidden=0)
+Approval rate: 100.0%
+LLM cost: $0.000000 total; $0.000000 per published app
+LLM calls: 3 (real=3, mock=0)
+Cost basis complete: yes
+```
+
+Volume is the only gate criterion still failing
+(3/20 generated apps). Approval quality has moved from 0% to **100%**
+on this batch — the LLM proposals were good enough for the technical
+checklist to pass cleanly.
+
+**Public UI verification via Playwright.** Hit the public catalog
+under `http://localhost:8000` (screenshots under
+`/tmp/llmmarket-public-*.png`):
+
+| URL | Status | Mentions |
+|---|---|---|
+| `/` | 200 | Forgemax, MCP Tools Py, Gram visible in "Trending now" and "Fresh in the grid" |
+| `/apps/` (full catalog) | 200 | same 3 |
+| `/apps/newly-added/` | 200 | same 3 |
+| `/apps/forgemax/` | 200 | full description + capability evidence list + similar tools |
+| `/apps/mcp-tools-py/` | 200 | full description |
+| `/apps/gram/` | 200 | full description |
+
+**Side bug found (preexisting, not from pilot):**
+`/apps/<category-slug>/` returns 404 because
+`apps.catalog.urls` registers `apps/<slug:slug>/` (app detail) *before*
+`config/urls.py` registers `apps/<slug:category_slug>/`
+(category page). Django dispatches on first match, so the category
+route is dead — only slugs that happen to be App slugs resolve to
+anything. The comment in `apps/catalog/urls.py:6-7` already
+acknowledges the collision risk but the wiring order is reversed.
+
+**Demo-data cleanup.** With three real published apps in the catalog,
+the operator asked to remove the synthetic seed apps that
+`docker/entrypoint.sh` calls `manage.py seed_demo` to create on every
+boot. Deletion summary (inside container):
+
+```
+Deleted total: 30
+  catalog.AppPlatform:   11
+  catalog.AppCategory:    8
+  newsletter.IssueApp:    5
+  catalog.App:            6
+```
+
+Apps removed: `AI Code Assistant`, `Smart Task Manager`,
+`Data Analyzer Pro`, `Neural Writer`, `CyberShield MCP`, `PromptForge`.
+`apps/catalog/management/commands/seed_demo.py::DEMO_APPS` cleared to
+`[]` and the module docstring updated so the demo payload doesn't
+return on the next `docker compose up`. Reference data
+(platforms / categories / capabilities / listing-types from
+`apps/catalog/fixtures/seed.json`) is untouched — the agent depends on
+it for taxonomy snapshots.
+
+Public catalog now contains exactly the 3 agent-generated apps; the
+home page "Trending now" and "Fresh in the grid" sections show only
+real Forgemax / MCP Tools Py / Gram cards.
+
+**Tests after cleanup:** `pytest tests/ -q → 129 passed`.
+
+**Status**
+
+End-to-end pipeline verified through the public UI on real data. The
+Phase 3 gate now closes only on the volume criterion (3/20). Logging
+this run separately so the approval-rate metric (100% on this batch)
+isn't conflated with future, larger pilots.
