@@ -149,7 +149,11 @@ class LLMCallLog(models.Model):
     output_tokens = models.PositiveIntegerField(default=0)
     cached_tokens = models.PositiveIntegerField(
         default=0,
-        help_text="Tokens served from prompt cache (Anthropic). 0 for OpenAI / mock.",
+        help_text=(
+            "Tokens served from prompt cache (OpenAI prompt cache or "
+            "Anthropic cache_read). Subtracted from billable input before "
+            "the cached-input price is applied. 0 for mock provider."
+        ),
     )
     cost_usd = models.DecimalField(
         max_digits=10, decimal_places=6, default=0,

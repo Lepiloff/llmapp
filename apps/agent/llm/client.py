@@ -214,6 +214,7 @@ class OpenAIProvider(LLMProvider):
         api_key: str,
         client=None,
         input_cost_per_1m_tokens: float = 0.0,
+        cached_input_cost_per_1m_tokens: float = 0.0,
         output_cost_per_1m_tokens: float = 0.0,
         max_retries: int = 3,
     ) -> None:
@@ -221,6 +222,7 @@ class OpenAIProvider(LLMProvider):
             raise ValueError("OpenAIProvider requires a non-empty model.")
         self.model = model
         self.input_cost_per_1m_tokens = input_cost_per_1m_tokens
+        self.cached_input_cost_per_1m_tokens = cached_input_cost_per_1m_tokens
         self.output_cost_per_1m_tokens = output_cost_per_1m_tokens
         self.max_retries = max(1, max_retries)
         if client is not None:
@@ -279,8 +281,10 @@ class OpenAIProvider(LLMProvider):
         cost_usd = _estimate_cost_usd(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
             input_cost_per_1m_tokens=self.input_cost_per_1m_tokens,
             output_cost_per_1m_tokens=self.output_cost_per_1m_tokens,
+            cached_input_cost_per_1m_tokens=self.cached_input_cost_per_1m_tokens,
         )
 
         return LLMResponse(
@@ -417,9 +421,11 @@ def build_provider(
     if role == "primary":
         provider_key = settings.AGENT_LLM_PROVIDER_PRIMARY
         model = settings.AGENT_LLM_MODEL_PRIMARY
+        cost_prefix = "AGENT_OPENAI_PRIMARY"
     elif role == "cheap":
         provider_key = settings.AGENT_LLM_PROVIDER_CHEAP
         model = settings.AGENT_LLM_MODEL_CHEAP
+        cost_prefix = "AGENT_OPENAI_CHEAP"
     else:
         raise ValueError(f"Unknown LLM role: {role!r}")
 
@@ -452,10 +458,13 @@ def build_provider(
             model=model,
             api_key=settings.OPENAI_API_KEY,
             input_cost_per_1m_tokens=float(
-                getattr(settings, "AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS", 0) or 0
+                getattr(settings, f"{cost_prefix}_INPUT_COST_PER_1M_TOKENS", 0) or 0
+            ),
+            cached_input_cost_per_1m_tokens=float(
+                getattr(settings, f"{cost_prefix}_CACHED_COST_PER_1M_TOKENS", 0) or 0
             ),
             output_cost_per_1m_tokens=float(
-                getattr(settings, "AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0) or 0
+                getattr(settings, f"{cost_prefix}_OUTPUT_COST_PER_1M_TOKENS", 0) or 0
             ),
         )
 
@@ -484,12 +493,24 @@ def _estimate_cost_usd(
     *,
     input_tokens: int,
     output_tokens: int,
+    cached_tokens: int = 0,
     input_cost_per_1m_tokens: float,
     output_cost_per_1m_tokens: float,
+    cached_input_cost_per_1m_tokens: float = 0.0,
 ) -> float:
+    """Compute per-call cost, accounting for prompt-cache discounts.
+
+    OpenAI reports ``prompt_tokens`` as the total (cached + non-cached);
+    the cached subset is in ``prompt_tokens_details.cached_tokens`` and
+    is billed at ~10% of the standard input price. We subtract cached
+    from billable input so the row reflects the actual invoice.
+    """
+    cached = max(0, min(cached_tokens, input_tokens))
+    non_cached_input = max(0, input_tokens - cached)
     return (
-        (input_tokens / 1_000_000) * input_cost_per_1m_tokens
-        + (output_tokens / 1_000_000) * output_cost_per_1m_tokens
+        non_cached_input / 1_000_000 * input_cost_per_1m_tokens
+        + cached / 1_000_000 * cached_input_cost_per_1m_tokens
+        + output_tokens / 1_000_000 * output_cost_per_1m_tokens
     )
 
 

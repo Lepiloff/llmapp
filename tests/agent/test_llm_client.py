@@ -124,6 +124,7 @@ def test_openai_provider_returns_parsed_schema_and_metadata() -> None:
         api_key="test-key",
         client=_fake_client(completions),
         input_cost_per_1m_tokens=2.5,
+        cached_input_cost_per_1m_tokens=0.25,
         output_cost_per_1m_tokens=10.0,
     )
 
@@ -142,7 +143,11 @@ def test_openai_provider_returns_parsed_schema_and_metadata() -> None:
     assert response.meta.input_tokens == 1000
     assert response.meta.output_tokens == 500
     assert response.meta.cached_tokens == 120
-    assert response.meta.cost_usd == pytest.approx(0.0075)
+    # Billable input = 1000 - 120 = 880 tokens × $2.50 / 1M  = $0.00220
+    # Cached input  = 120 tokens × $0.25 / 1M                = $0.00003
+    # Output        = 500 tokens × $10.00 / 1M               = $0.00500
+    # Total                                                  = $0.00723
+    assert response.meta.cost_usd == pytest.approx(0.00723)
     assert response.meta.is_mock is False
 
     call = completions.calls[0]
@@ -279,31 +284,119 @@ def test_openai_wire_schema_converts_enriched_draft_capability_list() -> None:
     assert completions.calls[0]["response_format"] is _OpenAIEnrichedDraft
 
 
+def _settings_with_prices(**overrides) -> SimpleNamespace:
+    """Build a settings stub that already includes the per-role cost knobs.
+
+    Tests that don't care about prices can pass overrides to set the
+    provider/model bits they need; the cost fields default to 0.
+    """
+    base = {
+        "AGENT_LLM_PROVIDER_PRIMARY": "mock",
+        "AGENT_LLM_MODEL_PRIMARY": "",
+        "AGENT_LLM_PROVIDER_CHEAP": "mock",
+        "AGENT_LLM_MODEL_CHEAP": "",
+        "OPENAI_API_KEY": "",
+        "ANTHROPIC_API_KEY": "",
+        "AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS": 0,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 def test_build_provider_requires_model_for_real_provider() -> None:
-    settings = SimpleNamespace(
+    settings = _settings_with_prices(
         AGENT_LLM_PROVIDER_PRIMARY="openai",
         AGENT_LLM_MODEL_PRIMARY="",
-        AGENT_LLM_PROVIDER_CHEAP="mock",
-        AGENT_LLM_MODEL_CHEAP="",
         OPENAI_API_KEY="test-key",
-        ANTHROPIC_API_KEY="",
-        AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS=0,
-        AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS=0,
     )
 
     with pytest.raises(ImproperlyConfigured, match="AGENT_LLM_MODEL"):
         build_provider("primary", settings_module=settings)
 
 
+def test_build_provider_uses_role_specific_openai_prices() -> None:
+    """Primary and cheap roles must read from their own price keys so
+    a gpt-mini primary and a gpt-nano cheap don't share one price pair.
+    Regression: F2 — single global cost vars mis-billed cheap calls."""
+    settings = _settings_with_prices(
+        AGENT_LLM_PROVIDER_PRIMARY="openai",
+        AGENT_LLM_MODEL_PRIMARY="gpt-mini",
+        AGENT_LLM_PROVIDER_CHEAP="openai",
+        AGENT_LLM_MODEL_CHEAP="gpt-nano",
+        OPENAI_API_KEY="test-key",
+        AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS=0.75,
+        AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS=0.075,
+        AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS=4.50,
+        AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS=0.20,
+        AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS=0.02,
+        AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS=1.25,
+    )
+
+    primary = build_provider("primary", settings_module=settings)
+    cheap = build_provider("cheap", settings_module=settings)
+
+    assert isinstance(primary, OpenAIProvider)
+    assert isinstance(cheap, OpenAIProvider)
+    assert primary.model == "gpt-mini"
+    assert primary.input_cost_per_1m_tokens == 0.75
+    assert primary.cached_input_cost_per_1m_tokens == 0.075
+    assert primary.output_cost_per_1m_tokens == 4.50
+    assert cheap.model == "gpt-nano"
+    assert cheap.input_cost_per_1m_tokens == 0.20
+    assert cheap.cached_input_cost_per_1m_tokens == 0.02
+    assert cheap.output_cost_per_1m_tokens == 1.25
+
+
 def test_cost_helpers_tolerate_missing_usage_details() -> None:
     assert _extract_cached_tokens(None) == 0
     assert _extract_cached_tokens(SimpleNamespace(prompt_tokens_details={})) == 0
+    # Backwards-compat: callers that don't supply cached_tokens get the
+    # old "all input is non-cached" behavior.
     assert _estimate_cost_usd(
         input_tokens=1000,
         output_tokens=1000,
         input_cost_per_1m_tokens=1.0,
         output_cost_per_1m_tokens=2.0,
     ) == pytest.approx(0.003)
+
+
+def test_estimate_cost_usd_discounts_cached_input() -> None:
+    """Cached tokens are subtracted from billable input and billed at
+    the (much cheaper) cached-input price. Without this, prompt-cache
+    hits would inflate cost_usd by ~10x for cached-heavy workloads."""
+    cost = _estimate_cost_usd(
+        input_tokens=10_000,
+        output_tokens=2_000,
+        cached_tokens=8_000,
+        input_cost_per_1m_tokens=0.75,
+        output_cost_per_1m_tokens=4.50,
+        cached_input_cost_per_1m_tokens=0.075,
+    )
+    # billable input = 2000 × 0.75 / 1M    = $0.0015
+    # cached         = 8000 × 0.075 / 1M   = $0.0006
+    # output         = 2000 × 4.50 / 1M    = $0.0090
+    # total                                = $0.0111
+    assert cost == pytest.approx(0.0111)
+
+
+def test_estimate_cost_usd_clamps_cached_above_input() -> None:
+    """Defensive: if a provider over-reports cached_tokens (> input_tokens),
+    we clamp instead of producing a negative billable-input bill."""
+    cost = _estimate_cost_usd(
+        input_tokens=1_000,
+        output_tokens=0,
+        cached_tokens=99_999,
+        input_cost_per_1m_tokens=10.0,
+        output_cost_per_1m_tokens=0.0,
+        cached_input_cost_per_1m_tokens=1.0,
+    )
+    # cached clamped to 1000 → billable input = 0; cost = 1000 × 1.0/1M = $0.001
+    assert cost == pytest.approx(0.001)
 
 
 def test_safe_provider_error_does_not_include_exception_message() -> None:

@@ -335,11 +335,31 @@ AGENT_LLM_MODEL_PRIMARY = config("AGENT_LLM_MODEL_PRIMARY", default="")
 AGENT_LLM_MODEL_CHEAP = config("AGENT_LLM_MODEL_CHEAP", default="")
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
-AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS = config(
-    "AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+# Per-role pricing knobs. Primary (full enrichment, e.g. gpt-5.4-mini) and
+# cheap (discovery classification, e.g. gpt-5.4-nano) use different models
+# at different price points, so a single global pair would mis-cost one of
+# them. Cached-input has its own line item: OpenAI bills tokens served from
+# prompt cache at ~10% of the standard input rate, and `_estimate_cost_usd`
+# subtracts cached from billable input before applying the cached price.
+# All default to 0.0 so the agent app boots without API access; operators
+# set real numbers before enabling discovery beat.
+AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
 )
-AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS = config(
-    "AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
+AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
+AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
+AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS", default=0.0, cast=float
+)
+AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS = config(
+    "AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS", default=0.0, cast=float
 )
 
 # Budget cap (hard stop at 100%, alert at 80%). Empty = no budget enforcement

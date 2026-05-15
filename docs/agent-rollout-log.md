@@ -32,7 +32,7 @@ bootstrap.
 Phase 3 -> Phase 4 gate: OPEN
 Generated RSS/GitHub apps: 25 (draft=1, published=24, hidden=0)
 Approval rate: 96.0%
-LLM cost: $0.000000 total; $0.000000 per published app
+LLM cost: $0.147591 total; $0.006150 per published app
 LLM calls: 25 (real=25, mock=0)
 Cost basis complete: yes
 ```
@@ -66,19 +66,27 @@ Cost basis complete: yes
   AGENT_LLM_MODEL_PRIMARY=gpt-5.4-mini
   AGENT_LLM_PROVIDER_CHEAP=openai
   AGENT_LLM_MODEL_CHEAP=gpt-5.4-nano
+  # Per-role + per-channel pricing (input / cached / output, $/1M tokens):
+  AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS=0.75
+  AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS=0.075
+  AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS=4.50
+  AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS=0.20
+  AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS=0.02
+  AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS=1.25
   AGENT_MONTHLY_BUDGET_USD=20
-  AGENT_SOURCES_ENABLED=          # discovery off by default
-  GITHUB_TOKEN=<pat>               # 30 req/min search, 5000/h contents
+  AGENT_SOURCES_ENABLED=           # discovery off by default
+  GITHUB_TOKEN=<pat>                # 30 req/min search, 5000/h contents
   OPENAI_API_KEY=<sk-...>
   ```
 * Anthropic provider stub exists in `apps/agent/llm/client.py:184` but
-  raises `NotImplementedError`. Memory note: primary should be Claude
-  Sonnet — work item open.
-* OpenAI per-model cost vars (`AGENT_OPENAI_INPUT_COST_PER_1M_TOKENS`,
-  `AGENT_OPENAI_OUTPUT_COST_PER_1M_TOKENS`) are unset, so every
-  `LLMCallLog.cost_usd` is $0. Phase 3 gate still opens because the
-  gate is count + approval-rate driven; cost dashboarding will not
-  work until these are populated.
+  raises `NotImplementedError`. **Deferred** until after prod release
+  per operator policy.
+* Cost backfill: `manage.py agent_backfill_costs` walks every non-mock
+  `LLMCallLog`, matches `model` to the configured primary/cheap roles,
+  and rewrites `cost_usd`. `--include-nonzero` re-applies prices after
+  a vendor price change. Phase 3's 25 discovery rows + 36 prior MCP-
+  registry enrichment rows backfilled at total $0.153408 (post-fix
+  per-published-app cost: $0.006150).
 
 **Run discovery (preferred path — inside the container, broker
 resolves):**
@@ -131,10 +139,10 @@ docker compose exec -T web python manage.py agent_phase3_report --json
 | # | Issue | Where | Impact |
 |---|---|---|---|
 | F1 | Anthropic provider not implemented | `apps/agent/llm/client.py:184` | Deferred — prod release runs on OpenAI per operator policy |
-| F2 | OpenAI per-model cost vars unset | `.env` + `apps/agent/llm/client.py:451` | `cost_per_published_usd=$0.00`; budget tracking is blind |
+| F2 | ~~OpenAI per-model cost vars unset~~ | ~~`.env` + `apps/agent/llm/client.py`~~ | **Closed.** Per-role pricing wired with cached-input discount; 61 historical rows backfilled |
 | F3 | ~~`/apps/<category-slug>/` returns 404~~ | ~~`apps/catalog/urls.py`~~ | **Closed in `8cc913a`** — single dispatcher view routes detail vs. category by slug lookup |
 | F4 | Host → docker-broker route | `redis` hostname unreachable from host venv | `--apply` from host needs `CELERY_TASK_ALWAYS_EAGER=True`; use container path instead |
-| F5 | `_enriched_to_app_draft` infers platform from `mcp-server` listing only | `apps/agent/persist.py:288-290` | DRAFTs without `mcp-server` listing get empty platforms and fail publish (e.g. Trigger.dev #12) |
+| F5 | ~~`_enriched_to_app_draft` infers platform from `mcp-server` listing only~~ | ~~`apps/agent/persist.py`~~ | **Closed in `ec249d1`** — `_derive_platforms` covers all 6 listing types |
 
 ---
 
@@ -381,19 +389,13 @@ Two prod-blockers landed in commit `5233f2f`:
 
 ### A. Quick ROI / close open findings
 
-1. **F5 — Listing→platform inference.** Generalise
-   `_enriched_to_app_draft` to derive platforms from the LLM-proposed
-   listing types rather than hard-coding `mcp-server` → `mcp`. Or
-   accept a `platforms` field directly from the LLM (schema already
-   has one). Effort: ~30 min.
-2. **F2 — OpenAI per-model cost env vars.** Configure
-   `AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS` /
-   `..._OUTPUT_...` and the cheap-role pair. Wire role-aware lookup
-   in `apps/agent/llm/client.py::build_provider`. Repopulate
-   `LLMCallLog.cost_usd` for the existing 25 rows via a small backfill
-   (multiplies tokens × configured price). Effort: ~30 min once prices
-   in hand. Needs operator-provided prices for `gpt-5.4-mini` and
-   `gpt-5.4-nano`.
+1. ~~**F5 — Listing→platform inference.**~~ **Closed in `ec249d1`.**
+2. ~~**F2 — OpenAI per-model cost env vars.**~~ **Closed.** Per-role
+   pricing keys (`AGENT_OPENAI_PRIMARY_*` / `AGENT_OPENAI_CHEAP_*`,
+   each with input / cached / output channels) wired through
+   `build_provider`. `_estimate_cost_usd` subtracts cached tokens from
+   billable input and applies the cached-input price. New
+   `manage.py agent_backfill_costs` re-priced 61 historical rows.
 3. **F1 — Anthropic provider. DEFERRED.** Operator policy: prod
    release runs on OpenAI; Anthropic provider is post-prod. Note
    retained so it isn't lost if the policy changes later.
