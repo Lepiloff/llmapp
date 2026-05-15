@@ -1,107 +1,27 @@
-"""Seed the catalog with reference data and a handful of demo apps.
+"""Seed the catalog with reference data (platforms / categories / capabilities).
 
-Idempotent: skips records that already exist, so it is safe to run on
-every container start. Used by docker/entrypoint.sh for first-boot.
+The demo-app payload was removed after the agent pipeline started
+producing real catalog entries — keeping synthetic placeholders alongside
+real apps blurred the public catalog. The reference-data path is
+unchanged and still runs idempotently on first boot.
 
 Usage:
-    python manage.py seed_demo               # references + demo apps
-    python manage.py seed_demo --refs-only   # references only
+    python manage.py seed_demo               # references only (was: + demo apps)
+    python manage.py seed_demo --refs-only   # same as no args, kept for compat
 """
 from __future__ import annotations
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
-from django.db import transaction
 
-from apps.catalog.models import App, Category, Platform
+from apps.catalog.models import Category, Platform
 
 
-DEMO_APPS = [
-    {
-        "name": "AI Code Assistant",
-        "slug": "ai-code-assistant",
-        "short_description": "Intelligent coding assistant with multi-language support.",
-        "long_description": (
-            "AI Code Assistant uses advanced LLMs to provide intelligent code completion, "
-            "refactoring suggestions, and bug detection across Python, TypeScript, Go and Rust."
-        ),
-        "developer_name": "CodeCraft Labs",
-        "official_page_url": "https://example.com/ai-code-assistant",
-        "quality_score": 95,
-        "platforms": ["chatgpt", "claude"],
-        "categories": ["developer-tools"],
-    },
-    {
-        "name": "Smart Task Manager",
-        "slug": "smart-task-manager",
-        "short_description": "AI task management with auto-priority and smart scheduling.",
-        "long_description": (
-            "Smart Task Manager leverages AI to automatically prioritize your tasks, suggest "
-            "optimal schedules, and predict deadlines based on your work patterns."
-        ),
-        "developer_name": "ProductivityPro",
-        "official_page_url": "https://example.com/smart-task-manager",
-        "quality_score": 88,
-        "platforms": ["chatgpt"],
-        "categories": ["productivity"],
-    },
-    {
-        "name": "Data Analyzer Pro",
-        "slug": "data-analyzer-pro",
-        "short_description": "Advanced data analysis and visualization powered by AI.",
-        "long_description": (
-            "Data Analyzer Pro transforms raw data into actionable insights using cutting-edge "
-            "AI algorithms and beautiful visualizations."
-        ),
-        "developer_name": "DataTech Solutions",
-        "official_page_url": "https://example.com/data-analyzer-pro",
-        "quality_score": 92,
-        "platforms": ["claude", "mcp"],
-        "categories": ["data-analytics", "research"],
-    },
-    {
-        "name": "Neural Writer",
-        "slug": "neural-writer",
-        "short_description": "AI writing assistant for content creators and marketers.",
-        "long_description": (
-            "Neural Writer combines GPT-class models with editorial expertise to produce "
-            "polished, on-brand content in seconds."
-        ),
-        "developer_name": "WriteAI Inc",
-        "official_page_url": "https://example.com/neural-writer",
-        "quality_score": 90,
-        "platforms": ["chatgpt", "claude"],
-        "categories": ["marketing"],
-    },
-    {
-        "name": "CyberShield MCP",
-        "slug": "cybershield-mcp",
-        "short_description": "MCP server with security analysis and threat detection.",
-        "long_description": (
-            "CyberShield MCP exposes vulnerability scanners, OSINT lookups, and intrusion "
-            "detection signals to your AI assistant via the Model Context Protocol."
-        ),
-        "developer_name": "SecureLLM",
-        "official_page_url": "https://example.com/cybershield-mcp",
-        "quality_score": 87,
-        "platforms": ["mcp", "claude"],
-        "categories": ["developer-tools"],
-    },
-    {
-        "name": "PromptForge",
-        "slug": "promptforge",
-        "short_description": "Prompt engineering toolkit with version control and A/B testing.",
-        "long_description": (
-            "PromptForge gives prompt engineers a Git-like workflow: branches, diffs, evals, "
-            "and rollback for every prompt change."
-        ),
-        "developer_name": "ForgeWorks",
-        "official_page_url": "https://example.com/promptforge",
-        "quality_score": 84,
-        "platforms": ["chatgpt", "claude"],
-        "categories": ["developer-tools", "productivity"],
-    },
-]
+# Demo apps removed once the agent pipeline started producing real
+# entries (docs/agent-rollout-log.md, 2026-05-15). Kept as an empty
+# list so the rest of the command still type-checks; restore from
+# git history if a placeholder catalog is ever needed again.
+DEMO_APPS: list[dict] = []
 
 
 class Command(BaseCommand):
