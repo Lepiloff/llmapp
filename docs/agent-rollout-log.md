@@ -20,9 +20,11 @@ bootstrap.
 * **Phase 3** — Discovery (RSS + GitHub MCP), new-app enrichment,
   README fetch, manual CLI, gate report. ✅ **Phase 3 → Phase 4 gate
   is OPEN.**
-* **Phase 4** — Prereqs done (link-checker + `Source.last_enriched_at`).
-  Re-actualization pipeline, official directories, beat schedule still
-  to be built.
+* **Phase 4** — Re-actualization pipeline + vanish detection ✅.
+  Beat-gated by `AGENT_REACTUALIZATION_ENABLED` (default False), runs
+  daily at 07:00 UTC after the 05:00 link-checker batch. Official
+  directories (ChatGPT App Directory / Claude Connectors / Gemini
+  Apps) still ToS-blocked.
 * **Phase 5** — Not started: budget hard-stop, admin dashboard, eval
   pack.
 
@@ -75,6 +77,12 @@ Cost basis complete: yes
   AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS=1.25
   AGENT_MONTHLY_BUDGET_USD=20
   AGENT_SOURCES_ENABLED=           # discovery off by default
+  # Phase 4 re-actualization: off by default; daily beat at 07:00 UTC
+  # picks AGENT_REACTUALIZATION_BATCH_SIZE apps whose freshest source
+  # is older than AGENT_REACTUALIZATION_INTERVAL_DAYS.
+  AGENT_REACTUALIZATION_ENABLED=False
+  AGENT_REACTUALIZATION_INTERVAL_DAYS=30
+  AGENT_REACTUALIZATION_BATCH_SIZE=20
   GITHUB_TOKEN=<pat>                # 30 req/min search, 5000/h contents
   OPENAI_API_KEY=<sk-...>
   ```
@@ -369,6 +377,61 @@ Commit `fcd631f`.
 
 ---
 
+## Phase 4 — Re-actualization + vanish detection (2026-05-15) ✅
+
+`apps/agent/pipeline/reactualize.py::compute_reactualization` is the
+pure-Python diff that compares an `AppSnapshot` against a fresh
+`EnrichedDraft` and returns a `ReactualizationDiff` covering text
+fields, capabilities (with new evidence + confidence), taxonomy
+additions and disappearances, and editorial proposals. **The diff is
+the only output** — published cards are editor-owned, so the bridge
+never auto-applies anything.
+
+`apps/agent/persist.py::queue_reactualization` is the Django bridge:
+non-empty diffs become one `NeedsReviewQueueEntry(kind=REACTUALIZED)`;
+empty diffs still advance `Source.last_enriched_at` so the cadence
+window resets without spamming the editor. `Source.payload` carries
+an `agent_reactualization` audit block.
+
+`apps/agent/tasks.py::run_reactualize_app` orchestrates one app:
+picks the freshest re-actualizable `Source`, re-fetches via the
+per-source-type fetcher (GitHub MCP rows go through the README API,
+everything else through `fetch_url_text`), runs `enrich_new_app`,
+diffs against the snapshot, persists. `reactualize_apps_batch` is the
+beat wrapper, gated by `AGENT_REACTUALIZATION_ENABLED` (default
+False); `dry_run=True` bypasses the flag for manual probes.
+
+Beat schedule entry runs daily at **07:00 UTC**, after the 05:00
+link-checker batch — so vanished sources flip `Source.is_active=False`
+*before* re-actualization runs and we never re-fetch a URL that the
+link checker already buried.
+
+Selector `pending_reactualization_app_ids` orders NULLS FIRST so
+apps never enriched at all drain ahead of the long-tail refresh
+cycle. `_REACTUALIZABLE_SOURCE_TYPES` is an opt-in allowlist
+(MCP_REGISTRY, AGENT_ENRICH, RSS_DISCOVERY, GITHUB_MCP); MANUAL
+cards are off-limits.
+
+**Vanish detection on link checker** (`apps/sources/tasks.py`): at
+the exact failure increment that crosses
+`AUTO_DEPRECATE_FAILURE_THRESHOLD=7` on `official` or `install`
+targets, the link checker now also flips `Source.is_active=False` for
+any source whose `source_url` matches the dead URL and writes one
+`NeedsReviewQueueEntry(kind=VANISHED, payload={target, url,
+status_code, consecutive_failures, sources_deactivated})`. Fires
+exactly once per crossing — subsequent failures don't spam the queue,
+recovery resets the counter so a later breakage queues a fresh event.
+
+Tests: 24 new across `tests/agent/test_reactualize.py` (10),
+`tests/agent/test_reactualize_task.py` (8), and additions to
+`tests/sources/test_link_checker.py` (6) — `tests/` is 178 passing.
+
+Commits: `31b3e8d` (pure-Python diff), `95abb60` (Django bridge),
+`4395493` (orchestrator + beat + settings), `538c12b` (vanish
+detection in link checker).
+
+---
+
 ## Prod deploy hardening (2026-05-15) ✅
 
 Two prod-blockers landed in commit `5233f2f`:
@@ -403,19 +466,14 @@ Two prod-blockers landed in commit `5233f2f`:
 
 ### B. Phase 4 — re-actualization + official directories
 
-1. **Re-actualization pipeline (`apps/agent/pipeline/reactualize.py`).**
-   Input: `AppSnapshot` + fresh `FetchResult` list. Re-run enrichment,
-   diff against `AppSnapshot`. Every App-field change goes to
-   `NeedsReviewQueueEntry(kind=reactualized, payload=diff)`. Only
-   `Source.last_enriched_at`, `Source.payload`, and `LinkHealth` auto-
-   update. Vanish detection via existing `LinkHealth.consecutive_failures`
-   pattern: 3 × 404 → `Source.is_active=False` +
-   `NeedsReviewQueueEntry(kind=vanished)`. Beat task
-   `reactualize_apps_batch(limit=20)` daily at 07:00 UTC. Setting
-   `AGENT_REACTUALIZATION_INTERVAL_DAYS=30`.
-2. **Link-checker beat.** `check_app_links_batch` already exists with
-   the corrected selector / threshold; wire it into
-   `CELERY_BEAT_SCHEDULE`.
+1. ~~**Re-actualization pipeline.**~~ **Closed.** `reactualize.py` +
+   `queue_reactualization` + `run_reactualize_app` +
+   `reactualize_apps_batch` beat. Link-checker now also queues a
+   `kind=vanished` review entry on threshold crossing.
+2. ~~**Link-checker beat.**~~ **Closed (already wired).**
+   `check_app_links_batch` was scheduled in
+   `CELERY_BEAT_SCHEDULE` from the Phase 4-prereq slice — the rollout
+   log's earlier "still to be built" line was stale.
 3. **Official directories — ToS-gated.** ChatGPT App Directory /
    Claude Connectors / Gemini Apps. **Legal/ToS review required
    first.** If permitted, build conservative scrapers (1 RPS/domain,
