@@ -37,7 +37,9 @@ from apps.agent.persist import (
     assert_app_is_eligible,
     build_app_snapshot,
     build_taxonomy_snapshot,
+    queue_reactualization,
 )
+from apps.agent.pipeline.reactualize import ReactualizationDiff, FieldDelta, TaxonomyDelta
 from apps.agent.pipeline.enrich import enrich_existing_draft
 from apps.catalog.models import (
     App,
@@ -690,6 +692,85 @@ def test_search_refresh_scheduled_on_use_case_addition(
 )
 def test_derive_platforms(listing_slugs, expected) -> None:
     assert _derive_platforms(listing_slugs) == expected
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — re-actualization persist
+# ---------------------------------------------------------------------------
+def test_queue_reactualization_writes_queue_entry_when_diff_nonempty(
+    draft_app,
+) -> None:
+    source = Source.objects.get(app=draft_app)
+    diff = ReactualizationDiff(
+        app_id=draft_app.pk,
+        fields=[FieldDelta(
+            field="short_description",
+            old_value="",
+            new_value="Brand-new summary",
+        )],
+        categories=TaxonomyDelta(added=["developer-tools"]),
+    )
+
+    result = queue_reactualization(
+        diff,
+        source_id=source.pk,
+        enrichment_task=None,
+        raw_fetch_payload={"url": "https://example/readme"},
+    )
+
+    assert result.queue_entry_id is not None
+    assert result.is_empty is False
+    entry = NeedsReviewQueueEntry.objects.get(pk=result.queue_entry_id)
+    assert entry.kind == NeedsReviewQueueEntry.Kind.REACTUALIZED
+    assert entry.app_id == draft_app.pk
+    assert entry.payload["fields"][0]["field"] == "short_description"
+    assert entry.payload["categories"]["added"] == ["developer-tools"]
+
+    source.refresh_from_db()
+    assert source.last_enriched_at is not None
+    assert source.payload["agent_reactualization"]["fetch"] == {"url": "https://example/readme"}
+    assert source.payload["agent_reactualization"]["queue_entry_id"] == result.queue_entry_id
+
+
+def test_queue_reactualization_skips_queue_when_diff_empty_but_still_advances_timestamp(
+    draft_app,
+) -> None:
+    """An empty diff = world hasn't changed since last enrichment. We
+    still advance Source.last_enriched_at so the next cadence window
+    starts now, but we never spam the editor with no-op queue entries."""
+    source = Source.objects.get(app=draft_app)
+    empty_diff = ReactualizationDiff(app_id=draft_app.pk)
+
+    result = queue_reactualization(
+        empty_diff,
+        source_id=source.pk,
+        enrichment_task=None,
+    )
+
+    assert result.queue_entry_id is None
+    assert result.is_empty is True
+    assert not NeedsReviewQueueEntry.objects.filter(
+        kind=NeedsReviewQueueEntry.Kind.REACTUALIZED
+    ).exists()
+    source.refresh_from_db()
+    assert source.last_enriched_at is not None
+
+
+def test_queue_reactualization_tolerates_missing_source(draft_app) -> None:
+    """If the orchestrator hands a stale source_id (the source row was
+    deleted between selection and persist), we still write the queue
+    entry — losing the audit timestamp is better than crashing the run."""
+    diff = ReactualizationDiff(
+        app_id=draft_app.pk,
+        fields=[FieldDelta(field="short_description", old_value="", new_value="x")],
+    )
+
+    result = queue_reactualization(
+        diff, source_id=999_999, enrichment_task=None
+    )
+
+    assert result.queue_entry_id is not None
+    assert NeedsReviewQueueEntry.objects.filter(pk=result.queue_entry_id).exists()
 
 
 def test_enriched_to_app_draft_propagates_platforms_from_listing_types() -> None:

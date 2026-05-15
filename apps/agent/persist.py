@@ -34,6 +34,7 @@ from apps.agent.llm.schemas import AppSnapshot, EnrichedDraft
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 from apps.agent.pipeline.enrich import EnrichmentResult, NewAppEnrichmentResult
 from apps.agent.pipeline.merge import Plan, QueueProposal
+from apps.agent.pipeline.reactualize import ReactualizationDiff
 from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 from apps.catalog.models import (
     App,
@@ -691,6 +692,79 @@ def _maybe_queue_review(
         payload=queue.as_dict(),
     )
     return entry.pk
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — re-actualization persist
+# ---------------------------------------------------------------------------
+@dataclass
+class ReactualizationPersistResult:
+    """What the Phase 4 bridge wrote — drives audit + orchestrator stats."""
+
+    queue_entry_id: int | None
+    source_id: int | None
+    is_empty: bool
+
+    def as_dict(self) -> dict:
+        return {
+            "queue_entry_id": self.queue_entry_id,
+            "source_id": self.source_id,
+            "is_empty": self.is_empty,
+        }
+
+
+def queue_reactualization(
+    diff: ReactualizationDiff,
+    *,
+    source_id: int | None,
+    enrichment_task: EnrichmentTask | None,
+    raw_fetch_payload: dict | None = None,
+) -> ReactualizationPersistResult:
+    """Persist one re-actualization outcome.
+
+    Writes:
+      * One ``NeedsReviewQueueEntry(kind=REACTUALIZED, payload=diff)`` —
+        only when ``diff`` reports actual changes.
+      * ``Source.last_enriched_at = now()`` for the source row that
+        owns this app, even when the diff is empty (re-actualization
+        cadence is driven by this timestamp, so we always advance it).
+      * ``Source.payload`` merged with an ``agent_reactualization``
+        block carrying the diff snapshot and fetch metadata for audit.
+
+    The agent never touches App fields directly here — that contract
+    is the whole reason Phase 4 exists as a separate pipeline.
+    """
+    queue_entry_id: int | None = None
+    if not diff.is_empty():
+        entry = NeedsReviewQueueEntry.objects.create(
+            app_id=diff.app_id,
+            task=enrichment_task,
+            kind=NeedsReviewQueueEntry.Kind.REACTUALIZED,
+            payload=diff.as_dict(),
+        )
+        queue_entry_id = entry.pk
+
+    if source_id is not None:
+        source = Source.objects.filter(pk=source_id).first()
+        if source is not None:
+            payload = {
+                **(source.payload or {}),
+                "agent_reactualization": {
+                    "diff": diff.as_dict(),
+                    "fetch": raw_fetch_payload or {},
+                    "queue_entry_id": queue_entry_id,
+                },
+            }
+            Source.objects.filter(pk=source_id).update(
+                last_enriched_at=timezone.now(),
+                payload=payload,
+            )
+
+    return ReactualizationPersistResult(
+        queue_entry_id=queue_entry_id,
+        source_id=source_id,
+        is_empty=diff.is_empty(),
+    )
 
 
 # ---------------------------------------------------------------------------
