@@ -23,8 +23,17 @@ from django.db.models import Count
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.agent.budget import (
+    assert_agent_can_run,
+    configured_budget_usd,
+    current_month_cost,
+    first_of_month,
+    is_discovery_disabled,
+)
 from apps.agent.llm.client import LLMProvider, build_provider
-from apps.agent.models import AgentRun, EnrichmentTask, NeedsReviewQueueEntry
+from apps.agent.models import (
+    AgentRun, BudgetMonthState, EnrichmentTask, NeedsReviewQueueEntry,
+)
 from apps.agent.pipeline.discovery import DiscoveryResult, classify_candidate
 from apps.agent.pipeline.fetch import FetchResult, fetch_url_text
 from apps.agent.persist import (
@@ -142,6 +151,7 @@ def run_enrich_existing_draft(
       tasks under a single ``AgentRun``; otherwise a per-task run is
       created.
     """
+    assert_agent_can_run()
     owns_run = run is None
     if run is None:
         run = AgentRun.objects.create(
@@ -253,6 +263,7 @@ def run_enrich_new_app(
     run: AgentRun | None = None,
 ) -> NewAppOutcome:
     """Fetch a candidate URL, enrich it into `EnrichedDraft`, optionally persist."""
+    assert_agent_can_run()
     owns_run = run is None
     if run is None:
         run = AgentRun.objects.create(
@@ -465,6 +476,8 @@ def _run_discovery_batch(
 ) -> dict:
     if not dry_run and not _source_enabled(source_flag):
         return {"skipped": "source_disabled", "source": source_flag}
+    if not dry_run and is_discovery_disabled():
+        return {"skipped": "budget_threshold", "source": source_flag}
 
     run = AgentRun.objects.create(
         source_type=source_label,
@@ -720,6 +733,7 @@ def run_reactualize_app(
     audit rows are written regardless so operators see exactly what was
     proposed during a dry probe.
     """
+    assert_agent_can_run()
     owns_run = run is None
     if run is None:
         run = AgentRun.objects.create(
@@ -902,3 +916,127 @@ def reactualize_apps_batch(
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error", "finished_at"])
         raise
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — monthly budget hard-stop
+# ---------------------------------------------------------------------------
+_BUDGET_DISCOVERY_THRESHOLD = 0.80  # 80% disables discovery
+_BUDGET_HARD_STOP_THRESHOLD = 1.00  # 100% blocks all agent work
+
+
+@shared_task
+def agent_budget_check() -> dict:
+    """Hourly beat: recompute monthly spend, flip latches, email once.
+
+    Two thresholds:
+      * **80%** — disable discovery; re-actualization keeps running.
+      * **100%** — hard stop on every new agent LLM call.
+
+    Both latch on first crossing within a month (manual edit to the
+    ``BudgetMonthState`` row clears them; the next calendar month
+    starts a fresh row, fresh latches). Email recipients come from
+    ``AGENT_BUDGET_ALERT_EMAILS`` (falls back to
+    ``AGENT_REVIEW_DIGEST_EMAILS`` then ``SUBMISSIONS_NOTIFY_EMAILS``)
+    and a missing list is logged + sent-count zero — the latch still
+    flips so workers gate correctly even without alerting.
+    """
+    budget = configured_budget_usd()
+    cost = current_month_cost()
+    month_start = first_of_month()
+    now = timezone.now()
+
+    state, _ = BudgetMonthState.objects.get_or_create(
+        month=month_start,
+        defaults={"total_cost_usd": cost, "budget_usd": budget},
+    )
+    state.total_cost_usd = cost
+    state.budget_usd = budget
+
+    util = float(cost / budget) if budget > 0 else 0.0
+    crossed_discovery_now = False
+    crossed_hard_stop_now = False
+
+    if budget > 0:
+        if util >= _BUDGET_HARD_STOP_THRESHOLD and state.hard_stop_at is None:
+            state.hard_stop_at = now
+            crossed_hard_stop_now = True
+        if util >= _BUDGET_DISCOVERY_THRESHOLD and state.discovery_disabled_at is None:
+            state.discovery_disabled_at = now
+            crossed_discovery_now = True
+
+    state.save()
+
+    sent_80 = 0
+    sent_100 = 0
+    if crossed_hard_stop_now:
+        sent_100 = _send_budget_alert(
+            subject_threshold=100,
+            cost=cost, budget=budget, state=state,
+        )
+        state.notified_100_at = now
+        state.save(update_fields=["notified_100_at"])
+    elif crossed_discovery_now:
+        sent_80 = _send_budget_alert(
+            subject_threshold=80,
+            cost=cost, budget=budget, state=state,
+        )
+        state.notified_80_at = now
+        state.save(update_fields=["notified_80_at"])
+
+    return {
+        "month": month_start.isoformat(),
+        "total_cost_usd": float(cost),
+        "budget_usd": float(budget),
+        "utilization": util,
+        "discovery_disabled": state.is_discovery_disabled,
+        "hard_stopped": state.is_hard_stopped,
+        "notified_80_sent": sent_80,
+        "notified_100_sent": sent_100,
+    }
+
+
+def _send_budget_alert(
+    *, subject_threshold: int, cost, budget, state: BudgetMonthState
+) -> int:
+    """Email recipients about a budget threshold crossing. Returns sent count."""
+    recipients = (
+        list(getattr(settings, "AGENT_BUDGET_ALERT_EMAILS", []) or [])
+        or list(getattr(settings, "AGENT_REVIEW_DIGEST_EMAILS", []) or [])
+        or list(getattr(settings, "SUBMISSIONS_NOTIFY_EMAILS", []) or [])
+    )
+    if not recipients:
+        logger.warning(
+            "agent_budget_alert_no_recipients",
+            extra={"threshold": subject_threshold, "month": state.month.isoformat()},
+        )
+        return 0
+    subject = (
+        f"[llmappmarket] Agent budget {subject_threshold}% reached — "
+        f"${cost:.2f} / ${budget:.2f} ({state.month:%Y-%m})"
+    )
+    if subject_threshold >= 100:
+        body = (
+            f"Monthly agent budget exhausted for {state.month:%Y-%m}.\n"
+            f"Total cost so far: ${cost:.4f} of ${budget:.2f}.\n\n"
+            "Hard stop is now active: enrichment, re-actualization, and "
+            "discovery tasks will refuse to run until manual review.\n\n"
+            "To reset: bump AGENT_MONTHLY_BUDGET_USD or clear "
+            "BudgetMonthState.hard_stop_at in the admin."
+        )
+    else:
+        body = (
+            f"Monthly agent budget reached 80% for {state.month:%Y-%m}.\n"
+            f"Total cost so far: ${cost:.4f} of ${budget:.2f}.\n\n"
+            "Discovery sources have been auto-disabled. Re-actualization "
+            "and on-demand enrichment continue to run.\n\n"
+            "To re-enable discovery before the budget refills, clear "
+            "BudgetMonthState.discovery_disabled_at in the admin."
+        )
+    return send_mail(
+        subject=subject,
+        message=body,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@llmappmarket.com"),
+        recipient_list=recipients,
+        fail_silently=False,
+    )

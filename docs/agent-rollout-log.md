@@ -25,8 +25,8 @@ bootstrap.
   daily at 07:00 UTC after the 05:00 link-checker batch. Official
   directories (ChatGPT App Directory / Claude Connectors / Gemini
   Apps) still ToS-blocked.
-* **Phase 5** — Not started: budget hard-stop, admin dashboard, eval
-  pack.
+* **Phase 5** — Budget hard-stop ✅. Admin dashboard + eval pack not
+  started (eval pack defers post-prod).
 
 **Catalog state right now:**
 
@@ -377,6 +377,48 @@ Commit `fcd631f`.
 
 ---
 
+## Phase 5 — Budget hard-stop (2026-05-15) ✅
+
+`BudgetMonthState` (one row per UTC month) is the persistent source of
+truth for whether new agent work is allowed. Beat task
+`agent_budget_check` runs hourly at :15, sums every non-mock
+`LLMCallLog.cost_usd` written this month, and upserts the row.
+
+Two latching thresholds, each fires exactly once per month:
+
+* **80% of `AGENT_MONTHLY_BUDGET_USD`** → set
+  `discovery_disabled_at`. The discovery batch (`_run_discovery_batch`)
+  returns `skipped: budget_threshold` before iterating candidates.
+  Re-actualization and on-demand enrichment keep running — operators
+  prefer "spend the rest of the budget on keeping the catalog fresh,
+  not on net-new cards."
+* **100%** → set `hard_stop_at`. `assert_agent_can_run` raises
+  `AgentBudgetExceeded`. The guard runs at the top of
+  `run_enrich_existing_draft` / `run_enrich_new_app` /
+  `run_reactualize_app` BEFORE the `AgentRun` row is created, so the
+  audit trail of "what got blocked" lives only in the beat task that
+  flipped the flag.
+
+Email recipients come from `AGENT_BUDGET_ALERT_EMAILS` →
+`AGENT_REVIEW_DIGEST_EMAILS` → `SUBMISSIONS_NOTIFY_EMAILS`. Missing
+recipients are logged but the latch still flips — workers must gate
+correctly even when alerting is misconfigured.
+
+Manual reset path (admin → BudgetMonthState):
+1. Bump `AGENT_MONTHLY_BUDGET_USD` (the next beat tick clears both
+   latches automatically when utilization drops below threshold).
+2. Or clear `discovery_disabled_at` / `hard_stop_at` directly. The
+   admin lists each month with utilization %, both latches, and the
+   cost/budget pair.
+
+Tests: 15 in `tests/agent/test_budget_hard_stop.py`. Total
+`tests/`: **193 passing**.
+
+Commits land in 5A–5D, see git history. F1 (Anthropic provider) is
+still deferred per operator policy; nothing else is open.
+
+---
+
 ## Phase 4 — Re-actualization + vanish detection (2026-05-15) ✅
 
 `apps/agent/pipeline/reactualize.py::compute_reactualization` is the
@@ -482,18 +524,19 @@ Two prod-blockers landed in commit `5233f2f`:
 
 ### C. Phase 5 — observability / guardrails
 
-1. **Budget hard-stop.** Beat task `agent_budget_check` (hourly): sum
-   `LLMCallLog.cost_usd` for the current month. At 80% of
-   `AGENT_MONTHLY_BUDGET_USD` → email alert + auto-disable discovery
-   sources (re-actualization keeps running, it's the more valuable
-   one). At 100% → pre-task hook refuses new agent work.
+1. ~~**Budget hard-stop.**~~ **Closed.** `BudgetMonthState` +
+   `agent_budget_check` hourly beat + `assert_agent_can_run` gates
+   in every orchestrator.
 2. **Admin cost dashboard.** Aggregate `AgentRun` / `LLMCallLog` by
    day × source × model. Use the existing admin or a small
-   `apps/agent/views.py` page.
+   `apps/agent/views.py` page. Lower priority now that the per-month
+   `BudgetMonthState` row gives operators the most-load-bearing
+   number at a glance.
 3. **Eval pack.** 10-20 hand-labelled fixtures in `tests/agent/eval/`
    mapping raw source payload → expected `EnrichedDraft`. Run as
    `pytest tests/agent/eval/ --eval`. Regression gate at >5pp
-   accuracy drop when prompts change.
+   accuracy drop when prompts change. Defer post-prod — current
+   prompt is stable.
 
 ### D. Catalog growth (operational, not code)
 

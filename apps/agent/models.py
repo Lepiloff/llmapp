@@ -249,3 +249,57 @@ class NeedsReviewQueueEntry(models.Model):
     @property
     def is_resolved(self) -> bool:
         return self.resolved_at is not None
+
+
+class BudgetMonthState(models.Model):
+    """Per-month snapshot driving the Phase 5 cost hard-stop.
+
+    Beat task ``agent_budget_check`` upserts one row per UTC calendar
+    month (keyed by the first-of-month date). Workers consult it
+    before every LLM call to decide whether discovery / new agent
+    work is allowed; the row is the canonical state, not a cache.
+
+    Two thresholds, both *latching* — set once when the threshold is
+    first crossed and only cleared by a manual edit or a budget bump.
+    Anti-flap: avoid a "below threshold for an hour, above for the
+    next hour" pattern that would auto-reverse the discovery flag and
+    let runaway loops sneak budget back.
+    """
+
+    month = models.DateField(
+        unique=True,
+        help_text="First day of the UTC calendar month this row tracks.",
+    )
+    total_cost_usd = models.DecimalField(
+        max_digits=12, decimal_places=6, default=0,
+        help_text="Sum of LLMCallLog.cost_usd written this month.",
+    )
+    budget_usd = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Snapshot of AGENT_MONTHLY_BUDGET_USD when the row was last updated.",
+    )
+    discovery_disabled_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Set when monthly cost first crossed 80% of the budget.",
+    )
+    hard_stop_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Set when monthly cost first crossed 100% of the budget.",
+    )
+    notified_80_at = models.DateTimeField(null=True, blank=True)
+    notified_100_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-month"]
+
+    def __str__(self) -> str:
+        return f"BudgetMonthState {self.month} ${self.total_cost_usd}/{self.budget_usd}"
+
+    @property
+    def is_discovery_disabled(self) -> bool:
+        return self.discovery_disabled_at is not None
+
+    @property
+    def is_hard_stopped(self) -> bool:
+        return self.hard_stop_at is not None

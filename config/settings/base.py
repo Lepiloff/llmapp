@@ -252,6 +252,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.reactualize_apps_batch",
         "schedule": crontab(hour=7, minute=0),
     },
+    "agent_budget_check": {
+        "task": "apps.agent.tasks.agent_budget_check",
+        "schedule": crontab(minute=15),  # hourly at :15
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -370,6 +374,12 @@ AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS = config(
 # (acceptable only during Phase 1 mock-only mode); must be set before any
 # real-API beat task is enabled.
 AGENT_MONTHLY_BUDGET_USD = config("AGENT_MONTHLY_BUDGET_USD", default="", cast=str)
+
+# Optional dedicated recipients for the Phase 5 budget alert at 80% / 100%.
+# Falls back to AGENT_REVIEW_DIGEST_EMAILS → SUBMISSIONS_NOTIFY_EMAILS.
+AGENT_BUDGET_ALERT_EMAILS = config(
+    "AGENT_BUDGET_ALERT_EMAILS", default="", cast=Csv()
+) or []
 
 # Polite-client controls.
 AGENT_RATE_LIMIT_RPS_PER_DOMAIN = config(

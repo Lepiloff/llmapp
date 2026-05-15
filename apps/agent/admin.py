@@ -14,7 +14,9 @@ from django.utils.safestring import mark_safe
 from apps.catalog.models import App
 from apps.catalog.services import recalc_quality_score, transition_to_published
 
-from .models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
+from .models import (
+    AgentRun, BudgetMonthState, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry,
+)
 
 
 @admin.register(AgentRun)
@@ -472,3 +474,41 @@ def _json_pretty(value) -> str:
         + escape(json.dumps(value, indent=2, sort_keys=True))
         + "</pre>"
     )
+
+
+@admin.register(BudgetMonthState)
+class BudgetMonthStateAdmin(admin.ModelAdmin):
+    """Visible so operators can clear the discovery/hard-stop latches.
+
+    The beat task ``agent_budget_check`` writes this row hourly; both
+    timestamp fields latch once set within a month. To resume agent
+    work after a budget breach, either bump
+    ``AGENT_MONTHLY_BUDGET_USD`` (the next beat tick clears both
+    flags) or clear the timestamps here directly.
+    """
+
+    list_display = (
+        "month", "utilization_pct", "total_cost_usd", "budget_usd",
+        "is_discovery_disabled", "is_hard_stopped", "updated_at",
+    )
+    readonly_fields = ("total_cost_usd", "budget_usd", "updated_at")
+    fields = (
+        "month", "total_cost_usd", "budget_usd", "updated_at",
+        "discovery_disabled_at", "hard_stop_at",
+        "notified_80_at", "notified_100_at",
+    )
+    ordering = ("-month",)
+
+    @admin.display(description="Utilization", ordering="total_cost_usd")
+    def utilization_pct(self, obj: BudgetMonthState) -> str:
+        if not obj.budget_usd:
+            return "—"
+        return f"{float(obj.total_cost_usd / obj.budget_usd) * 100:.1f}%"
+
+    @admin.display(boolean=True, description="Discovery off")
+    def is_discovery_disabled(self, obj: BudgetMonthState) -> bool:
+        return obj.is_discovery_disabled
+
+    @admin.display(boolean=True, description="Hard stop")
+    def is_hard_stopped(self, obj: BudgetMonthState) -> bool:
+        return obj.is_hard_stopped
