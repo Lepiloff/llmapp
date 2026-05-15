@@ -44,22 +44,31 @@ python manage.py migrate --noinput
 echo "🌱 Seeding reference data..."
 python manage.py seed_demo || echo "⚠️ Seed failed, continuing..."
 
-# Create superuser if it doesn't exist
-echo "👤 Creating superuser if needed..."
-python manage.py shell -c "
+# Optional superuser bootstrap.
+# Only runs when DJANGO_SUPERUSER_USERNAME / _EMAIL / _PASSWORD are all set
+# in the environment. No fallback defaults — a hardcoded admin/admin123
+# in image bootstrap is a security risk in production. Operators who want
+# automatic bootstrap must set the env vars explicitly; otherwise create
+# the superuser interactively with `manage.py createsuperuser`.
+echo "👤 Checking superuser bootstrap..."
+if [[ -n "${DJANGO_SUPERUSER_USERNAME:-}" && -n "${DJANGO_SUPERUSER_EMAIL:-}" && -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
+    if python manage.py shell -c "
+import sys
 from django.contrib.auth import get_user_model
-User = get_user_model()
-if not User.objects.filter(is_superuser=True).exists():
-    import os
-    User.objects.create_superuser(
-        username=os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin'),
-        email=os.environ.get('DJANGO_SUPERUSER_EMAIL', 'admin@llmappmarket.com'),
-        password=os.environ.get('DJANGO_SUPERUSER_PASSWORD', 'admin123')
-    )
-    print('✅ Superuser created')
-else:
-    print('✅ Superuser already exists')
-" || echo "⚠️ Superuser creation failed, continuing..."
+sys.exit(0 if get_user_model().objects.filter(is_superuser=True).exists() else 1)
+" >/dev/null 2>&1; then
+        echo "✅ Superuser already exists; skipping bootstrap"
+    else
+        echo "  Creating superuser '${DJANGO_SUPERUSER_USERNAME}' from env vars..."
+        python manage.py createsuperuser --noinput \
+            --username "$DJANGO_SUPERUSER_USERNAME" \
+            --email "$DJANGO_SUPERUSER_EMAIL"
+        echo "✅ Superuser created"
+    fi
+else
+    echo "⏭️  Skipping superuser bootstrap (DJANGO_SUPERUSER_* env vars not set)."
+    echo "    Run 'manage.py createsuperuser' to create one when needed."
+fi
 
 # Collect static files for web service
 if [[ "${1:-}" == "gunicorn"* ]]; then

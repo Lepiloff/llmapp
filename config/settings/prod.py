@@ -8,6 +8,12 @@ from .base import *  # noqa: F401,F403
 DEBUG = False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
+# CSRF — Django requires the scheme+host of any cross-origin form/XHR
+# submission to be listed here. Default empty (only same-origin requests
+# accepted). Set CSRF_TRUSTED_ORIGINS env var to a comma-separated list
+# like "https://llmappmarket.com,https://www.llmappmarket.com".
+CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
+
 # HTTPS / cookies
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
