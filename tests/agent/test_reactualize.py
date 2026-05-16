@@ -214,6 +214,48 @@ def test_proposed_verdict_reported_only_when_different() -> None:
     assert drift.proposed_verdict == "Fresh take after re-read"
 
 
+def test_use_case_only_drift_does_not_fire_queue_entry() -> None:
+    """is_empty() ignores use_cases on purpose. The LLM phrases use-case
+    titles slightly differently every run (e.g. "Connect to Slack" vs
+    "Connect Slack"), slugify yields different slugs, and a strict diff
+    would queue a noisy "use cases changed" entry every cycle for every
+    app. The diff still carries the use_cases delta — the editor sees it
+    when the queue entry fires for *other* drift — we just refuse to
+    fire on use_cases noise alone. (2026-05-16 dry-run pilot.)"""
+    diff = compute_reactualization(
+        _snapshot(),
+        _enriched(use_cases=[
+            "Scaffold a service",           # already in snapshot
+            "Generate API reference docs",  # net-new
+            "Spin up a server",             # net-new
+        ]),
+    )
+
+    # The diff still records the use_case churn — the data is there
+    # for the editor's review when a queue entry exists.
+    assert diff.use_cases.added == sorted([
+        "generate-api-reference-docs", "spin-up-a-server"
+    ])
+    # But on use_cases alone, no queue entry fires.
+    assert diff.is_empty() is True
+
+
+def test_use_case_drift_still_visible_when_other_axes_drift() -> None:
+    """When some other axis (a text field, a capability, a category)
+    drifts, is_empty() returns False as before and the use_cases delta
+    rides along into the queue entry payload."""
+    diff = compute_reactualization(
+        _snapshot(),
+        _enriched(
+            short_description="Reworded tagline",
+            use_cases=["Wholly new use case"],
+        ),
+    )
+    assert diff.is_empty() is False
+    assert diff.use_cases.added == ["wholly-new-use-case"]
+    assert diff.use_cases.removed == ["scaffold-a-service"]
+
+
 def test_as_dict_is_json_safe() -> None:
     """The diff is persisted into ``NeedsReviewQueueEntry.payload`` which
     is a JSONField. ``as_dict`` must produce JSON-serializable shapes."""

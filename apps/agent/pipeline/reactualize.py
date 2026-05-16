@@ -123,12 +123,19 @@ class ReactualizationDiff:
     proposed_scope_summary: str = ""
 
     def is_empty(self) -> bool:
+        # use_cases is intentionally excluded from this gate. LLM
+        # phrasing varies between runs, so titles like "Generate API
+        # reference docs" vs "Generate API reference documentation"
+        # slugify to different slugs and produce a stable +N -N churn
+        # every cycle. The diff still carries the use_case delta into
+        # the queue entry payload when *anything else* drifted, so
+        # editors see it on review; we just refuse to fire a queue
+        # entry on use-case noise alone. (2026-05-16 dry-run pilot.)
         return not (
             self.fields
             or self.capabilities
             or not self.categories.is_empty()
             or not self.listing_types.is_empty()
-            or not self.use_cases.is_empty()
             or self.proposed_verdict
             or self.proposed_launch_status_change
             or self.proposed_pricing_model_change
