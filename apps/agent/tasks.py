@@ -78,31 +78,41 @@ SOURCE_FLAG_RSS = "rss"
 SOURCE_FLAG_GITHUB_MCP = "github_mcp"
 
 
-def _fetcher_for_source(source) -> "Callable[[str], FetchResult]":
-    """Pick the right URL fetcher for a Source row.
+def _fetcher_for_url(url: str) -> "Callable[[str], FetchResult]":
+    """Pick a URL fetcher by host.
 
-    GitHub MCP sources need the README-via-API fetcher because their
-    canonical URL is a repo home page that doesn't return the README
-    text in raw HTML. Everything else uses ``fetch_url_text``.
+    GitHub repo URLs go through the README-via-API helper — the repo
+    home page doesn't serve README markdown in raw HTML, the API does.
+    Everything else uses ``fetch_url_text``. Dispatching on host rather
+    than ``source.source_type`` is the right level: the canonical URL
+    the LLM picked at discovery time often differs from the source
+    *kind*, e.g. a github_mcp source whose ``source_url`` ended up on
+    the vendor's product page (Speakeasy/gram, 2026-05-16).
     """
-    if source.source_type == Source.SourceType.GITHUB_MCP:
+    if "github.com/" in url:
         github_token = getattr(settings, "GITHUB_TOKEN", "")
-        return lambda url: fetch_github_readme_text(url, token=github_token)
+        return lambda u: fetch_github_readme_text(u, token=github_token)
     return fetch_url_text
 
 
 def _source_fetch_url(source) -> str:
     """Best URL to re-fetch a Source from.
 
-    Prefer the explicit ``source_url`` column; fall back to the
-    discovery payload's canonical URL (Phase 3 sources stored that
-    under ``payload.fetch.url``). The orchestrator skips the app if
-    neither produces a non-empty URL.
+    For github_mcp rows, prefer ``payload.fetch.repo_url`` because the
+    canonical ``source_url`` may hold a product page chosen by the LLM
+    at discovery time. For every other source type, ``source_url`` is
+    the right starting point; the discovery payload's canonical URL is
+    the last fallback.
     """
-    if source.source_url:
-        return source.source_url
     payload = source.payload or {}
     fetch_block = payload.get("fetch") or {}
+
+    if source.source_type == Source.SourceType.GITHUB_MCP:
+        repo_url = fetch_block.get("repo_url")
+        if repo_url:
+            return repo_url
+    if source.source_url:
+        return source.source_url
     return fetch_block.get("url") or payload.get("source_url") or ""
 
 
@@ -789,7 +799,7 @@ def run_reactualize_app(
                 skipped_reason="source_has_no_url",
             )
 
-        active_fetcher = fetcher or _fetcher_for_source(source)
+        active_fetcher = fetcher or _fetcher_for_url(url)
         fetched = active_fetcher(url)
         if not isinstance(fetched, FetchResult):
             raise TypeError("fetcher must return apps.agent.pipeline.fetch.FetchResult")

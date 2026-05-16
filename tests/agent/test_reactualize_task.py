@@ -31,7 +31,12 @@ from apps.agent.persist import (
     pick_primary_active_source,
 )
 from apps.agent.pipeline.fetch import FetchResult
-from apps.agent.tasks import reactualize_apps_batch, run_reactualize_app
+from apps.agent.tasks import (
+    _fetcher_for_url,
+    _source_fetch_url,
+    reactualize_apps_batch,
+    run_reactualize_app,
+)
 from apps.catalog.models import (
     App,
     Category,
@@ -276,6 +281,39 @@ def test_pending_reactualization_picks_overdue_apps_nulls_first(
     # published_app's source has NULL last_enriched_at → first.
     assert ids[0] == published_app.pk
     assert other_app.pk in ids
+
+
+def test_source_fetch_url_prefers_github_repo_url_over_canonical_for_github_mcp(
+    published_app,
+) -> None:
+    """Phase 3 stored the LLM-picked canonical URL in source_url, which
+    is sometimes a vendor product page rather than the GitHub repo.
+    Re-actualization must re-fetch the README path from payload.fetch
+    .repo_url, otherwise the github fetcher rejects non-GitHub URLs
+    (concrete regression: app id 11 'gram' / Speakeasy product page,
+    seen on 2026-05-16 dry-run probe).
+    """
+    source = Source.objects.get(app=published_app)
+    source.source_url = "https://www.speakeasy.com/product/gram"
+    source.payload = {
+        "fetch": {"repo_url": "https://github.com/speakeasy-api/gram"}
+    }
+    source.save()
+    assert _source_fetch_url(source) == "https://github.com/speakeasy-api/gram"
+
+
+def test_fetcher_for_url_dispatches_by_host_not_source_type() -> None:
+    """github.com URLs use the README-via-API fetcher; non-github URLs
+    use plain HTTP, regardless of how the source row is labeled."""
+    github = _fetcher_for_url("https://github.com/org/repo")
+    # The github fetcher is a lambda wrapping fetch_github_readme_text.
+    assert github.__qualname__.startswith(
+        "_fetcher_for_url.<locals>"
+    ), f"unexpected dispatch: {github.__qualname__}"
+    plain = _fetcher_for_url("https://example.com/page")
+    # Plain HTTP fetcher is the imported function itself.
+    from apps.agent.pipeline.fetch import fetch_url_text
+    assert plain is fetch_url_text
 
 
 def test_pick_primary_active_source_prefers_primary_then_most_recent(
