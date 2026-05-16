@@ -25,8 +25,10 @@ bootstrap.
   daily at 07:00 UTC after the 05:00 link-checker batch. Official
   directories (ChatGPT App Directory / Claude Connectors / Gemini
   Apps) still ToS-blocked.
-* **Phase 5** — Budget hard-stop ✅. Admin dashboard + eval pack not
-  started (eval pack defers post-prod).
+* **Phase 5** — Budget hard-stop ✅, admin cost dashboard ✅, eval
+  pack scaffolding + 3 baseline fixtures ✅. Only F1 (Anthropic
+  provider, policy-deferred) and B3 (official directories, ToS-gated)
+  remain in the open-findings list.
 
 **Catalog state right now:**
 
@@ -149,7 +151,7 @@ docker compose exec -T web python manage.py agent_phase3_report --json
 | F1 | Anthropic provider not implemented | `apps/agent/llm/client.py:184` | Deferred — prod release runs on OpenAI per operator policy |
 | F2 | ~~OpenAI per-model cost vars unset~~ | ~~`.env` + `apps/agent/llm/client.py`~~ | **Closed.** Per-role pricing wired with cached-input discount; 61 historical rows backfilled |
 | F3 | ~~`/apps/<category-slug>/` returns 404~~ | ~~`apps/catalog/urls.py`~~ | **Closed in `8cc913a`** — single dispatcher view routes detail vs. category by slug lookup |
-| F4 | Host → docker-broker route | `redis` hostname unreachable from host venv | `--apply` from host needs `CELERY_TASK_ALWAYS_EAGER=True`; use container path instead |
+| F4 | ~~Host → docker-broker route~~ | ~~`apps/agent/management/commands/agent_run.py`~~ | **Closed in `0e002ac`** — `ensure_eager_if_broker_unreachable` auto-flips host-venv runs to eager mode with a stderr warning |
 | F5 | ~~`_enriched_to_app_draft` infers platform from `mcp-server` listing only~~ | ~~`apps/agent/persist.py`~~ | **Closed in `ec249d1`** — `_derive_platforms` covers all 6 listing types |
 
 ---
@@ -377,6 +379,46 @@ Commit `fcd631f`.
 
 ---
 
+## Phase 5 round-2 — admin dashboard + eval pack (2026-05-16) ✅
+
+Two follow-ups landed after the prod-rebuild dry-run pilot:
+
+* **C2 — Admin cost dashboard** (`255ac2c`). `/admin/agent/agentrun/
+  cost-dashboard/`, reachable from the AgentRun changelist via a
+  "Cost dashboard" object-tool button. Shows current-month spend +
+  budget bar, the two latches as colored pills, per-day cost trend
+  (last 30 days), per-model + per-source breakdown for the current
+  month, and top 10 expensive AgentRuns linked to detail.
+* **C3 — Eval pack scaffolding** (`69ccf25`). `tests/agent/eval/`
+  with `--eval` flag, fixture loader, and 3 baseline validation
+  fixtures captured from the 2026-05-15 Phase 3 batch (forgemax,
+  mcp-tools-py, triggerdev). Replays saved LLM raw outputs through
+  `validate_enriched_draft` against a TaxonomySnapshot built from
+  `seed.json` (pure, no DB) and asserts byte-for-byte equality on
+  the sanitized result. Future `--eval-llm` extension will layer
+  real-LLM regression on top — kept as a separate flag because each
+  invocation costs real money (~$0.006/fixture).
+* **F4 — Host→docker-broker** (`0e002ac`). The "use container path"
+  runbook workaround became an auto-fallback: a 1-second TCP probe
+  to `CELERY_BROKER_URL` runs at the top of `manage.py agent_run`;
+  on DNS or connect failure the helper flips Django's
+  `CELERY_TASK_ALWAYS_EAGER=True` in process and writes one stderr
+  warning. Inside the container the probe succeeds and the helper
+  is a no-op.
+
+Use-case noise discovered during the 2026-05-16 dry-run probe was
+addressed in commit `3d2c7ce`: `ReactualizationDiff.is_empty()` no
+longer counts use-case slug churn as drift, since LLM phrasing
+variance produces a stable +N -N churn every cycle. The delta still
+rides into the queue-entry payload when *anything else* drifted.
+
+Total: **210 passing** in default sweep + 3 eval fixtures behind
+`--eval`. The only open items left on the rollout-log are F1
+(Anthropic, policy-deferred) and B3 (official directories,
+ToS-blocked).
+
+---
+
 ## Phase 5 — Budget hard-stop (2026-05-15) ✅
 
 `BudgetMonthState` (one row per UTC month) is the persistent source of
@@ -516,27 +558,28 @@ Two prod-blockers landed in commit `5233f2f`:
    `check_app_links_batch` was scheduled in
    `CELERY_BEAT_SCHEDULE` from the Phase 4-prereq slice — the rollout
    log's earlier "still to be built" line was stale.
-3. **Official directories — ToS-gated.** ChatGPT App Directory /
-   Claude Connectors / Gemini Apps. **Legal/ToS review required
-   first.** If permitted, build conservative scrapers (1 RPS/domain,
-   robots.txt, identifying UA); failure mode = Sentry + retry next
-   run. Beat 3×/week.
+3. **Official directories — BLOCKED on legal/ToS review.** ChatGPT
+   App Directory / Claude Connectors / Gemini Apps. Cannot implement
+   conservative scrapers without explicit ToS clearance per operator
+   policy. When unblocked, design constraints: 1 RPS/domain,
+   robots.txt, identifying User-Agent, failure mode = Sentry + retry
+   next run, beat 3×/week. **Action: route to legal/business owner
+   for ToS clearance before any code is written.**
 
 ### C. Phase 5 — observability / guardrails
 
 1. ~~**Budget hard-stop.**~~ **Closed.** `BudgetMonthState` +
    `agent_budget_check` hourly beat + `assert_agent_can_run` gates
    in every orchestrator.
-2. **Admin cost dashboard.** Aggregate `AgentRun` / `LLMCallLog` by
-   day × source × model. Use the existing admin or a small
-   `apps/agent/views.py` page. Lower priority now that the per-month
-   `BudgetMonthState` row gives operators the most-load-bearing
-   number at a glance.
-3. **Eval pack.** 10-20 hand-labelled fixtures in `tests/agent/eval/`
-   mapping raw source payload → expected `EnrichedDraft`. Run as
-   `pytest tests/agent/eval/ --eval`. Regression gate at >5pp
-   accuracy drop when prompts change. Defer post-prod — current
-   prompt is stable.
+2. ~~**Admin cost dashboard.**~~ **Closed.** `/admin/agent/agentrun/
+   cost-dashboard/` aggregates per-day / per-model / per-source +
+   top-10 expensive runs + latch pills (`255ac2c`).
+3. ~~**Eval pack.**~~ **Closed (scaffolding + 3 baseline fixtures).**
+   `tests/agent/eval/` with `--eval` flag; replay validation regression
+   on saved LLM raw outputs against `seed.json` taxonomy (`69ccf25`).
+   Extending the fixture set is a one-shell-line ORM dump; the
+   `--eval-llm` real-LLM mode is the next layer when prompt iteration
+   needs it.
 
 ### D. Catalog growth (operational, not code)
 
