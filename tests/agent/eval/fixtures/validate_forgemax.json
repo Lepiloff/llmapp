@@ -1,0 +1,173 @@
+{
+  "description": "Phase 3 github_mcp discovery for forgemax; captured 2026-05-15 baseline.",
+  "expected_sanitized_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.98,
+        "evidence": "Exposes exactly two MCP tools, `search` and `execute`, and describes MCP server handler behavior.",
+        "value": "yes"
+      },
+      "auth_required": {
+        "confidence": 0.6,
+        "evidence": "The README mentions credentials for downstream servers, but does not state whether Forgemax itself requires auth.",
+        "value": "unknown"
+      },
+      "interactive_ui": {
+        "confidence": 0.93,
+        "evidence": "The source describes an MCP server and CLI; no interactive UI is mentioned.",
+        "value": "no"
+      },
+      "local_setup_required": {
+        "confidence": 0.96,
+        "evidence": "Install and quick-start instructions are local CLI / build steps such as `npm install -g forgemax`, `cargo build --release`, and running `forgemax`.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.86,
+        "evidence": "The source is a GitHub repository with a source build path (`cargo build --release`) and install from source instructions.",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.96,
+        "evidence": "It can `search` manifests and `forge.readResource(server, uri)` to read MCP resources from downstream servers.",
+        "value": "yes"
+      },
+      "remote_available": {
+        "confidence": 0.91,
+        "evidence": "It supports downstream MCP client connections over stdio and HTTP/SSE and can serve via stdio MCP transport.",
+        "value": "yes"
+      },
+      "write_actions": {
+        "confidence": 0.95,
+        "evidence": "It can run JavaScript via `execute` and call downstream tools, including tool execution against connected servers.",
+        "value": "yes"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.97,
+        "slug": "developer-tools"
+      },
+      {
+        "confidence": 0.74,
+        "slug": "productivity"
+      }
+    ],
+    "developer_name": "postrv",
+    "developer_url": "https://github.com/postrv",
+    "install_url": "https://github.com/postrv/forgemax/blob/main/README.md#install",
+    "launch_status": "live",
+    "listing_types": [
+      {
+        "confidence": 0.99,
+        "slug": "mcp-server"
+      }
+    ],
+    "long_description": "Forgemax is a Code Mode MCP gateway that exposes two MCP tools—search and execute—to help LLMs discover and invoke tools across connected downstream MCP servers. It runs JavaScript in a sandboxed V8 isolate, supports reading MCP resources, session stash, and bounded parallel calls, and is aimed at reducing schema bloat and tool-selection overhead.",
+    "name": "Forgemax",
+    "official_page_url": "https://github.com/postrv/forgemax",
+    "pricing_model": "unknown",
+    "proposed_verdict": "Forgemax is an MCP gateway for developers and agent builders who want to compress many downstream tools into a small sandboxed surface. The trade-off is added orchestration complexity: users must write JavaScript and manage a local MCP gateway, but they gain much smaller schemas and safer isolated execution.",
+    "repo_url": "https://github.com/postrv/forgemax",
+    "scope_summary": "MCP gateway that exposes search/execute for tool discovery and sandboxed orchestration across connected MCP servers.",
+    "short_description": "An MCP gateway that collapses many downstream tools into two sandboxed tools, letting agents search manifests and execute JavaScript across connected MCP servers.",
+    "use_cases": [
+      "discover downstream tools",
+      "run JavaScript against MCP tools",
+      "read MCP resources",
+      "chain tool calls in one execution",
+      "reduce schema bloat",
+      "orchestrate connected MCP servers"
+    ]
+  },
+  "expected_validation": {
+    "dropped_capabilities_no_evidence": [],
+    "dropped_capabilities_unknown_key": [],
+    "dropped_categories_low_confidence": [],
+    "dropped_categories_unknown_slug": [],
+    "dropped_listing_types_low_confidence": [],
+    "dropped_listing_types_unknown_slug": [],
+    "dropped_urls_invalid": []
+  },
+  "name": "forgemax",
+  "raw_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.98,
+        "evidence": "Exposes exactly two MCP tools, `search` and `execute`, and describes MCP server handler behavior.",
+        "value": "yes"
+      },
+      "auth_required": {
+        "confidence": 0.6,
+        "evidence": "The README mentions credentials for downstream servers, but does not state whether Forgemax itself requires auth.",
+        "value": "unknown"
+      },
+      "interactive_ui": {
+        "confidence": 0.93,
+        "evidence": "The source describes an MCP server and CLI; no interactive UI is mentioned.",
+        "value": "no"
+      },
+      "local_setup_required": {
+        "confidence": 0.96,
+        "evidence": "Install and quick-start instructions are local CLI / build steps such as `npm install -g forgemax`, `cargo build --release`, and running `forgemax`.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.86,
+        "evidence": "The source is a GitHub repository with a source build path (`cargo build --release`) and install from source instructions.",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.96,
+        "evidence": "It can `search` manifests and `forge.readResource(server, uri)` to read MCP resources from downstream servers.",
+        "value": "yes"
+      },
+      "remote_available": {
+        "confidence": 0.91,
+        "evidence": "It supports downstream MCP client connections over stdio and HTTP/SSE and can serve via stdio MCP transport.",
+        "value": "yes"
+      },
+      "write_actions": {
+        "confidence": 0.95,
+        "evidence": "It can run JavaScript via `execute` and call downstream tools, including tool execution against connected servers.",
+        "value": "yes"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.97,
+        "slug": "developer-tools"
+      },
+      {
+        "confidence": 0.74,
+        "slug": "productivity"
+      }
+    ],
+    "developer_name": "postrv",
+    "developer_url": "https://github.com/postrv",
+    "install_url": "https://github.com/postrv/forgemax/blob/main/README.md#install",
+    "launch_status": "live",
+    "listing_types": [
+      {
+        "confidence": 0.99,
+        "slug": "mcp-server"
+      }
+    ],
+    "long_description": "Forgemax is a Code Mode MCP gateway that exposes two MCP tools—search and execute—to help LLMs discover and invoke tools across connected downstream MCP servers. It runs JavaScript in a sandboxed V8 isolate, supports reading MCP resources, session stash, and bounded parallel calls, and is aimed at reducing schema bloat and tool-selection overhead.",
+    "name": "Forgemax",
+    "official_page_url": "https://github.com/postrv/forgemax",
+    "pricing_model": "unknown",
+    "proposed_verdict": "Forgemax is an MCP gateway for developers and agent builders who want to compress many downstream tools into a small sandboxed surface. The trade-off is added orchestration complexity: users must write JavaScript and manage a local MCP gateway, but they gain much smaller schemas and safer isolated execution.",
+    "repo_url": "https://github.com/postrv/forgemax",
+    "scope_summary": "MCP gateway that exposes search/execute for tool discovery and sandboxed orchestration across connected MCP servers.",
+    "short_description": "An MCP gateway that collapses many downstream tools into two sandboxed tools, letting agents search manifests and execute JavaScript across connected MCP servers.",
+    "use_cases": [
+      "discover downstream tools",
+      "run JavaScript against MCP tools",
+      "read MCP resources",
+      "chain tool calls in one execution",
+      "reduce schema bloat",
+      "orchestrate connected MCP servers"
+    ]
+  }
+}

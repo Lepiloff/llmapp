@@ -1,0 +1,168 @@
+{
+  "description": "Phase 3 github_mcp discovery for triggerdev; captured 2026-05-15 baseline.",
+  "expected_sanitized_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.34,
+        "evidence": "An SDK and docs are mentioned, but the source does not explicitly state a general public API.",
+        "value": "unknown"
+      },
+      "auth_required": {
+        "confidence": 0.28,
+        "evidence": "The README mentions account/project creation for the web app, but does not specify authentication requirements for the listing.",
+        "value": "unknown"
+      },
+      "interactive_ui": {
+        "confidence": 0.68,
+        "evidence": "The README mentions a web app, dashboard filtering, realtime updates, and trace view/monitoring UI.",
+        "value": "yes"
+      },
+      "local_setup_required": {
+        "confidence": 0.74,
+        "evidence": "The README says to \"write tasks in your codebase\" and includes local development and self-hosting guides.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.98,
+        "evidence": "\"Open Source\" badge and GitHub repository are provided in the README.",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.2,
+        "evidence": "The source describes task execution and monitoring, but does not clearly state a data-reading integration for an LLM assistant.",
+        "value": "unknown"
+      },
+      "remote_available": {
+        "confidence": 0.81,
+        "evidence": "The README says tasks automatically scale and connect to \"our cloud\" and also mentions a web app and cloud onboarding.",
+        "value": "yes"
+      },
+      "write_actions": {
+        "confidence": 0.2,
+        "evidence": "The source describes running tasks and bulk actions on runs, but not a specific assistant-facing write action integration.",
+        "value": "unknown"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.95,
+        "slug": "developer-tools"
+      }
+    ],
+    "developer_name": "Trigger.dev",
+    "developer_url": "https://trigger.dev",
+    "install_url": "https://trigger.dev/docs/quick-start",
+    "launch_status": "live",
+    "listing_types": [],
+    "long_description": "Trigger.dev is an open-source platform for building AI workflows in TypeScript. It supports durable long-running tasks, retries, queues, observability, real-time updates, human-in-the-loop waits, and self-hosting.",
+    "name": "Trigger.dev",
+    "official_page_url": "https://trigger.dev",
+    "pricing_model": "unknown",
+    "proposed_verdict": "Trigger.dev is an open-source platform for building and deploying AI workflows and agents in TypeScript, aimed at developers who need durable background execution, retries, queues, and observability. The main trade-off is that it is a developer platform rather than a turnkey assistant app, so it fits teams willing to work in code or self-host.",
+    "repo_url": "https://github.com/triggerdotdev/trigger.dev",
+    "scope_summary": "Open-source TypeScript platform for AI workflows and agents with durable task execution, realtime updates, human-in-the-loop waits, observability, and self-hosting.",
+    "short_description": "Open-source platform for building and deploying AI workflows and agents in TypeScript, with durable long-running tasks, retries, queues, observability, and self-hosting options.",
+    "use_cases": [
+      "build durable AI workflows",
+      "run long-lived background tasks",
+      "add retries and queues",
+      "stream realtime task updates",
+      "pause for human approval",
+      "self-host workflows"
+    ]
+  },
+  "expected_validation": {
+    "dropped_capabilities_no_evidence": [],
+    "dropped_capabilities_unknown_key": [],
+    "dropped_categories_low_confidence": [
+      "productivity"
+    ],
+    "dropped_categories_unknown_slug": [],
+    "dropped_listing_types_low_confidence": [
+      "mcp-server"
+    ],
+    "dropped_listing_types_unknown_slug": [],
+    "dropped_urls_invalid": []
+  },
+  "name": "triggerdev",
+  "raw_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.34,
+        "evidence": "An SDK and docs are mentioned, but the source does not explicitly state a general public API.",
+        "value": "unknown"
+      },
+      "auth_required": {
+        "confidence": 0.28,
+        "evidence": "The README mentions account/project creation for the web app, but does not specify authentication requirements for the listing.",
+        "value": "unknown"
+      },
+      "interactive_ui": {
+        "confidence": 0.68,
+        "evidence": "The README mentions a web app, dashboard filtering, realtime updates, and trace view/monitoring UI.",
+        "value": "yes"
+      },
+      "local_setup_required": {
+        "confidence": 0.74,
+        "evidence": "The README says to \"write tasks in your codebase\" and includes local development and self-hosting guides.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.98,
+        "evidence": "\"Open Source\" badge and GitHub repository are provided in the README.",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.2,
+        "evidence": "The source describes task execution and monitoring, but does not clearly state a data-reading integration for an LLM assistant.",
+        "value": "unknown"
+      },
+      "remote_available": {
+        "confidence": 0.81,
+        "evidence": "The README says tasks automatically scale and connect to \"our cloud\" and also mentions a web app and cloud onboarding.",
+        "value": "yes"
+      },
+      "write_actions": {
+        "confidence": 0.2,
+        "evidence": "The source describes running tasks and bulk actions on runs, but not a specific assistant-facing write action integration.",
+        "value": "unknown"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.95,
+        "slug": "developer-tools"
+      },
+      {
+        "confidence": 0.52,
+        "slug": "productivity"
+      }
+    ],
+    "developer_name": "Trigger.dev",
+    "developer_url": "https://trigger.dev",
+    "install_url": "https://trigger.dev/docs/quick-start",
+    "launch_status": "live",
+    "listing_types": [
+      {
+        "confidence": 0.35,
+        "slug": "mcp-server"
+      }
+    ],
+    "long_description": "Trigger.dev is an open-source platform for building AI workflows in TypeScript. It supports durable long-running tasks, retries, queues, observability, real-time updates, human-in-the-loop waits, and self-hosting.",
+    "name": "Trigger.dev",
+    "official_page_url": "https://trigger.dev",
+    "pricing_model": "unknown",
+    "proposed_verdict": "Trigger.dev is an open-source platform for building and deploying AI workflows and agents in TypeScript, aimed at developers who need durable background execution, retries, queues, and observability. The main trade-off is that it is a developer platform rather than a turnkey assistant app, so it fits teams willing to work in code or self-host.",
+    "repo_url": "https://github.com/triggerdotdev/trigger.dev",
+    "scope_summary": "Open-source TypeScript platform for AI workflows and agents with durable task execution, realtime updates, human-in-the-loop waits, observability, and self-hosting.",
+    "short_description": "Open-source platform for building and deploying AI workflows and agents in TypeScript, with durable long-running tasks, retries, queues, observability, and self-hosting options.",
+    "use_cases": [
+      "build durable AI workflows",
+      "run long-lived background tasks",
+      "add retries and queues",
+      "stream realtime task updates",
+      "pause for human approval",
+      "self-host workflows"
+    ]
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "description": "Phase 3 github_mcp discovery for mcp-tools-py; captured 2026-05-15 baseline.",
+  "expected_sanitized_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.95,
+        "evidence": "\"providing code quality checking operations\" and exposes tools such as run_pylint_check, run_pytest_check, and run_mypy_check via the MCP protocol.",
+        "value": "yes"
+      },
+      "auth_required": {
+        "confidence": 0.72,
+        "evidence": "The README describes CLI and MCP client configuration but does not mention any authentication requirement.",
+        "value": "no"
+      },
+      "interactive_ui": {
+        "confidence": 0.88,
+        "evidence": "The server is configured via CLI/MCP client settings; no interactive UI is described.",
+        "value": "no"
+      },
+      "local_setup_required": {
+        "confidence": 0.97,
+        "evidence": "Installation and use require installing the package and running it with a local `--project-dir` and Python environment/venv settings.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.98,
+        "evidence": "The README explicitly says, \"The server is open source.\"",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.9,
+        "evidence": "It runs checks on a specified project directory and reads project configuration such as `pyproject.toml`.",
+        "value": "yes"
+      },
+      "remote_available": {
+        "confidence": 0.55,
+        "evidence": "The source does not state whether it can be used remotely beyond MCP client compatibility.",
+        "value": "unknown"
+      },
+      "write_actions": {
+        "confidence": 0.84,
+        "evidence": "The described tools run checks and generate prompts/logs; no project-modifying actions are described.",
+        "value": "no"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.98,
+        "slug": "developer-tools"
+      }
+    ],
+    "developer_name": "Marcus Jellinghaus",
+    "developer_url": "https://github.com/MarcusJellinghaus",
+    "install_url": "https://github.com/MarcusJellinghaus/mcp-tools-py.git",
+    "launch_status": "live",
+    "listing_types": [
+      {
+        "confidence": 0.99,
+        "slug": "mcp-server"
+      }
+    ],
+    "long_description": "MCP Tools Py is a Model Context Protocol server for running Python code quality checks in a specified project directory. It provides tools for pylint, pytest, and mypy, with auto-detection of common source and test directories, structured logging, and configuration options for MCP clients such as Claude Desktop and VSCode with GitHub Copilot.",
+    "name": "MCP Tools Py",
+    "official_page_url": "https://github.com/MarcusJellinghaus/mcp-tools-py/blob/main/README.md",
+    "pricing_model": "unknown",
+    "proposed_verdict": "A focused MCP server for Python code quality checks, aimed at developers using Claude Desktop, VSCode Copilot, or other MCP clients. It is useful for running pylint, pytest, and mypy on a scoped project directory, though it is limited to Python projects and requires local setup.",
+    "repo_url": "https://github.com/MarcusJellinghaus/mcp-tools-py",
+    "scope_summary": "MCP server for Python-only code quality checking in a specified project directory, with tools for pylint, pytest, and mypy plus structured logging and MCP client configuration support.",
+    "short_description": "MCP server for Python code quality checks using pylint, pytest, and mypy, with scoped project-directory execution and structured outputs for MCP clients.",
+    "use_cases": [
+      "run pylint checks",
+      "execute pytest tests",
+      "run mypy type checking",
+      "analyze Python project directories",
+      "auto-detect source and test folders",
+      "generate structured prompts from check results"
+    ]
+  },
+  "expected_validation": {
+    "dropped_capabilities_no_evidence": [],
+    "dropped_capabilities_unknown_key": [],
+    "dropped_categories_low_confidence": [],
+    "dropped_categories_unknown_slug": [],
+    "dropped_listing_types_low_confidence": [],
+    "dropped_listing_types_unknown_slug": [],
+    "dropped_urls_invalid": []
+  },
+  "name": "mcp-tools-py",
+  "raw_draft": {
+    "capabilities": {
+      "api_available": {
+        "confidence": 0.95,
+        "evidence": "\"providing code quality checking operations\" and exposes tools such as run_pylint_check, run_pytest_check, and run_mypy_check via the MCP protocol.",
+        "value": "yes"
+      },
+      "auth_required": {
+        "confidence": 0.72,
+        "evidence": "The README describes CLI and MCP client configuration but does not mention any authentication requirement.",
+        "value": "no"
+      },
+      "interactive_ui": {
+        "confidence": 0.88,
+        "evidence": "The server is configured via CLI/MCP client settings; no interactive UI is described.",
+        "value": "no"
+      },
+      "local_setup_required": {
+        "confidence": 0.97,
+        "evidence": "Installation and use require installing the package and running it with a local `--project-dir` and Python environment/venv settings.",
+        "value": "yes"
+      },
+      "open_source": {
+        "confidence": 0.98,
+        "evidence": "The README explicitly says, \"The server is open source.\"",
+        "value": "yes"
+      },
+      "read_data": {
+        "confidence": 0.9,
+        "evidence": "It runs checks on a specified project directory and reads project configuration such as `pyproject.toml`.",
+        "value": "yes"
+      },
+      "remote_available": {
+        "confidence": 0.55,
+        "evidence": "The source does not state whether it can be used remotely beyond MCP client compatibility.",
+        "value": "unknown"
+      },
+      "write_actions": {
+        "confidence": 0.84,
+        "evidence": "The described tools run checks and generate prompts/logs; no project-modifying actions are described.",
+        "value": "no"
+      }
+    },
+    "categories": [
+      {
+        "confidence": 0.98,
+        "slug": "developer-tools"
+      }
+    ],
+    "developer_name": "Marcus Jellinghaus",
+    "developer_url": "https://github.com/MarcusJellinghaus",
+    "install_url": "https://github.com/MarcusJellinghaus/mcp-tools-py.git",
+    "launch_status": "live",
+    "listing_types": [
+      {
+        "confidence": 0.99,
+        "slug": "mcp-server"
+      }
+    ],
+    "long_description": "MCP Tools Py is a Model Context Protocol server for running Python code quality checks in a specified project directory. It provides tools for pylint, pytest, and mypy, with auto-detection of common source and test directories, structured logging, and configuration options for MCP clients such as Claude Desktop and VSCode with GitHub Copilot.",
+    "name": "MCP Tools Py",
+    "official_page_url": "https://github.com/MarcusJellinghaus/mcp-tools-py/blob/main/README.md",
+    "pricing_model": "unknown",
+    "proposed_verdict": "A focused MCP server for Python code quality checks, aimed at developers using Claude Desktop, VSCode Copilot, or other MCP clients. It is useful for running pylint, pytest, and mypy on a scoped project directory, though it is limited to Python projects and requires local setup.",
+    "repo_url": "https://github.com/MarcusJellinghaus/mcp-tools-py",
+    "scope_summary": "MCP server for Python-only code quality checking in a specified project directory, with tools for pylint, pytest, and mypy plus structured logging and MCP client configuration support.",
+    "short_description": "MCP server for Python code quality checks using pylint, pytest, and mypy, with scoped project-directory execution and structured outputs for MCP clients.",
+    "use_cases": [
+      "run pylint checks",
+      "execute pytest tests",
+      "run mypy type checking",
+      "analyze Python project directories",
+      "auto-detect source and test folders",
+      "generate structured prompts from check results"
+    ]
+  }
+}
