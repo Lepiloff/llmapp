@@ -2,15 +2,25 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib import admin, messages
 from django.contrib.admin.utils import quote
+from django.db.models import Count, Sum
 from django.http import HttpRequest, HttpResponseRedirect
-from django.urls import reverse
+from django.shortcuts import render
+from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import mark_safe
 
+from apps.agent.budget import (
+    configured_budget_usd,
+    current_month_cost,
+    first_of_month,
+    get_current_state,
+)
 from apps.catalog.models import App
 from apps.catalog.services import recalc_quality_score, transition_to_published
 
@@ -48,6 +58,34 @@ class AgentRunAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request) -> bool:
         return False
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "cost-dashboard/",
+                self.admin_site.admin_view(self.cost_dashboard_view),
+                name="agent_agentrun_cost_dashboard",
+            ),
+        ]
+        return custom + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["dashboard_url"] = reverse(
+            "admin:agent_agentrun_cost_dashboard"
+        )
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def cost_dashboard_view(self, request: HttpRequest):
+        """One-page aggregate of LLM cost — what BudgetMonthState shows
+        plus the per-day / per-model / per-source breakdown an operator
+        wants when investigating a spike. Read-only; no actions."""
+        context = self.admin_site.each_context(request)
+        context.update(_build_cost_dashboard_context())
+        return render(
+            request, "admin/agent/cost_dashboard.html", context
+        )
 
 
 @admin.register(EnrichmentTask)
@@ -512,3 +550,78 @@ class BudgetMonthStateAdmin(admin.ModelAdmin):
     @admin.display(boolean=True, description="Hard stop")
     def is_hard_stopped(self, obj: BudgetMonthState) -> bool:
         return obj.is_hard_stopped
+
+
+# ---------------------------------------------------------------------------
+# Cost dashboard helpers
+# ---------------------------------------------------------------------------
+def _build_cost_dashboard_context() -> dict:
+    """Aggregate context for the admin cost dashboard view.
+
+    Covers the three views an operator wants when investigating spend:
+    current-month budget snapshot, per-day cost trend (last 30 days),
+    and per-source × per-model breakdown for the current month. Top
+    expensive AgentRuns this month round out the page so a spike is
+    one click from its root cause.
+    """
+    now = timezone.now()
+    month_start = first_of_month(now)
+    budget = configured_budget_usd()
+    month_total = current_month_cost()
+    state = get_current_state()
+
+    last_30 = now - timedelta(days=30)
+    by_day_qs = (
+        LLMCallLog.objects.filter(
+            created_at__gte=last_30, is_mock=False
+        )
+        .extra(select={"day": "date(created_at)"})  # noqa: SLF001 — admin dashboard
+        .values("day")
+        .annotate(cost=Sum("cost_usd"), calls=Count("id"))
+        .order_by("-day")
+    )
+    by_day = [
+        {"day": row["day"], "cost": row["cost"] or Decimal("0"), "calls": row["calls"]}
+        for row in by_day_qs
+    ]
+
+    by_model = (
+        LLMCallLog.objects.filter(
+            created_at__date__gte=month_start, is_mock=False
+        )
+        .values("provider", "model")
+        .annotate(cost=Sum("cost_usd"), calls=Count("id"))
+        .order_by("-cost")
+    )
+
+    by_source = (
+        LLMCallLog.objects.filter(
+            created_at__date__gte=month_start, is_mock=False
+        )
+        .values("task__run__source_type")
+        .annotate(cost=Sum("cost_usd"), calls=Count("id"))
+        .order_by("-cost")
+    )
+
+    top_runs = (
+        AgentRun.objects.filter(started_at__date__gte=month_start)
+        .order_by("-total_cost_usd")[:10]
+    )
+
+    utilization_pct = float(month_total / budget) * 100 if budget else 0.0
+
+    return {
+        "title": "Agent cost dashboard",
+        "month_start": month_start,
+        "month_total": month_total,
+        "budget": budget,
+        "utilization_pct": utilization_pct,
+        "state": state,
+        "by_day": by_day,
+        "by_model": by_model,
+        "by_source": by_source,
+        "top_runs": top_runs,
+        "budget_state_changelist_url": reverse(
+            "admin:agent_budgetmonthstate_changelist"
+        ),
+    }

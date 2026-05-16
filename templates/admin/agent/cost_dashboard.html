@@ -1,0 +1,173 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}Agent cost dashboard | {{ site_title }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='agent' %}">Agent</a>
+  &rsaquo; Cost dashboard
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .cd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 16px 0; }
+  .cd-card { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 16px 20px; }
+  .cd-card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #666; letter-spacing: 0.5px; }
+  .cd-big { font-size: 28px; font-weight: 600; color: #222; }
+  .cd-sub { color: #666; font-size: 13px; margin-top: 6px; }
+  .cd-bar { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .cd-bar-fill { height: 100%; background: linear-gradient(to right, #4caf50 0%, #ff9800 80%, #f44336 100%); }
+  .cd-bar-fill.over { background: #f44336; }
+  table.cd-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.cd-table th, table.cd-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+  table.cd-table th { background: #f7f7f7; font-weight: 600; }
+  table.cd-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.green { background: #e8f5e9; color: #2e7d32; }
+  .pill.amber { background: #fff8e1; color: #ef6c00; }
+  .pill.red { background: #ffebee; color: #c62828; }
+</style>
+
+<h1>Agent cost dashboard — {{ month_start|date:"Y-m" }}</h1>
+
+<div class="cd-grid">
+  <div class="cd-card">
+    <h2>Current month spend</h2>
+    <div class="cd-big">${{ month_total|floatformat:4 }}</div>
+    <div class="cd-sub">
+      {% if budget %}
+        of ${{ budget|floatformat:2 }} budget
+        ({{ utilization_pct|floatformat:1 }}% used)
+      {% else %}
+        no budget configured — set AGENT_MONTHLY_BUDGET_USD to enable enforcement
+      {% endif %}
+    </div>
+    {% if budget %}
+      <div class="cd-bar">
+        <div class="cd-bar-fill{% if utilization_pct >= 100 %} over{% endif %}"
+             style="width: {% if utilization_pct > 100 %}100{% else %}{{ utilization_pct|floatformat:0 }}{% endif %}%"></div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cd-card">
+    <h2>Latches</h2>
+    {% if state %}
+      <div>
+        Discovery:
+        {% if state.is_discovery_disabled %}
+          <span class="pill amber">disabled @ {{ state.discovery_disabled_at|date:"Y-m-d H:i" }} UTC</span>
+        {% else %}
+          <span class="pill green">enabled</span>
+        {% endif %}
+      </div>
+      <div style="margin-top:8px">
+        Hard stop:
+        {% if state.is_hard_stopped %}
+          <span class="pill red">active @ {{ state.hard_stop_at|date:"Y-m-d H:i" }} UTC</span>
+        {% else %}
+          <span class="pill green">inactive</span>
+        {% endif %}
+      </div>
+      <div class="cd-sub" style="margin-top:12px">
+        <a href="{{ budget_state_changelist_url }}">Manage BudgetMonthState →</a>
+      </div>
+    {% else %}
+      <div class="cd-sub">
+        agent_budget_check hasn't run yet this month.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="cd-card">
+  <h2>Per-day cost (last 30 days, real calls only)</h2>
+  {% if by_day %}
+    <table class="cd-table">
+      <thead><tr><th>Day (UTC)</th><th class="num">Calls</th><th class="num">Cost</th></tr></thead>
+      <tbody>
+        {% for row in by_day %}
+          <tr>
+            <td>{{ row.day|date:"Y-m-d" }}</td>
+            <td class="num">{{ row.calls }}</td>
+            <td class="num">${{ row.cost|floatformat:6 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="cd-sub">No real-API calls recorded yet.</div>
+  {% endif %}
+</div>
+
+<div class="cd-grid">
+  <div class="cd-card">
+    <h2>By model (this month)</h2>
+    {% if by_model %}
+      <table class="cd-table">
+        <thead><tr><th>Provider / Model</th><th class="num">Calls</th><th class="num">Cost</th></tr></thead>
+        <tbody>
+          {% for row in by_model %}
+            <tr>
+              <td>{{ row.provider }} / {{ row.model }}</td>
+              <td class="num">{{ row.calls }}</td>
+              <td class="num">${{ row.cost|floatformat:6 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="cd-sub">No real-API calls this month.</div>
+    {% endif %}
+  </div>
+
+  <div class="cd-card">
+    <h2>By source (this month)</h2>
+    {% if by_source %}
+      <table class="cd-table">
+        <thead><tr><th>AgentRun.source_type</th><th class="num">Calls</th><th class="num">Cost</th></tr></thead>
+        <tbody>
+          {% for row in by_source %}
+            <tr>
+              <td>{{ row.task__run__source_type|default:"(unknown)" }}</td>
+              <td class="num">{{ row.calls }}</td>
+              <td class="num">${{ row.cost|floatformat:6 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="cd-sub">No AgentRuns this month.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="cd-card">
+  <h2>Top 10 expensive runs this month</h2>
+  {% if top_runs %}
+    <table class="cd-table">
+      <thead>
+        <tr>
+          <th>Run</th><th>Source</th><th>Status</th><th>Started</th><th class="num">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in top_runs %}
+          <tr>
+            <td><a href="{% url 'admin:agent_agentrun_change' run.pk %}">#{{ run.pk }}</a></td>
+            <td>{{ run.source_type }}</td>
+            <td>{{ run.status }}</td>
+            <td>{{ run.started_at|date:"Y-m-d H:i" }} UTC</td>
+            <td class="num">${{ run.total_cost_usd|floatformat:6 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="cd-sub">No AgentRuns this month yet.</div>
+  {% endif %}
+</div>
+
+{% endblock %}
