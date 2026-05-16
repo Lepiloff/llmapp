@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+from django.db import transaction
 
 from apps.catalog.models import Category, Platform
 
