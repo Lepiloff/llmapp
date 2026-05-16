@@ -33,6 +33,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
+from apps.agent.management._broker_probe import ensure_eager_if_broker_unreachable
 from apps.agent.models import EnrichmentTask
 from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
 from apps.agent.tasks import discover_github_mcp, discover_rss, run_enrich_existing_draft
@@ -91,6 +92,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
+        ensure_eager_if_broker_unreachable(self.stderr)
         dry_run = not options["apply"]
         allow_non_mcp = options["allow_non_mcp"]
         if options.get("source"):
