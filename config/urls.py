@@ -15,6 +15,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 from apps.catalog import views as catalog_views
+from apps.catalog.api import api as catalog_api
 from apps.search import views as search_views
 
 from apps.seo.sitemaps import AppsSitemap, CategoriesSitemap, PlatformsSitemap, StaticSitemap
@@ -29,6 +30,9 @@ sitemaps = {
 urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
+
+    # Public read-only API (v1) — OpenAPI docs live at /api/v1/docs.
+    path('api/v1/', catalog_api.urls),
 
     # Health checks
     path('health/', include('apps.core.urls')),

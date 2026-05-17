@@ -114,10 +114,17 @@ def build_limiter_from_settings() -> RateLimiter:
 
     Returns:
       * ``NoopRateLimiter`` if RPS ≤ 0 (no enforcement).
-      * ``RedisDomainRateLimiter`` if Redis is reachable.
+      * ``RedisDomainRateLimiter`` if Redis is reachable within a short
+        startup probe window.
       * ``InMemoryDomainRateLimiter`` as a soft fallback when Redis
-        can't be reached — logs a loud warning so operators notice the
-        degraded guarantee.
+        can't be reached — logs a single info-level line so operators
+        see the degraded guarantee without traceback noise on every
+        ``manage.py`` invocation.
+
+    Probe budget is intentionally tiny (``socket_timeout=1.0``) so a
+    dev host without docker-network resolution doesn't pay 20s on
+    every command. Worker / web containers — where Redis is reachable
+    — fly through this in single-digit milliseconds.
     """
     from django.conf import settings
     from apps.agent.pipeline.rate_limit import (
@@ -135,11 +142,23 @@ def build_limiter_from_settings() -> RateLimiter:
         from django_redis import get_redis_connection
 
         client = get_redis_connection("default")
-        client.ping()
+        # Short-timeout ping. django_redis exposes the underlying
+        # redis-py client; we set the socket timeout on a single call
+        # without touching pool defaults.
+        original_timeout = client.connection_pool.connection_kwargs.get(
+            "socket_timeout"
+        )
+        client.connection_pool.connection_kwargs["socket_timeout"] = 1.0
+        try:
+            client.ping()
+        finally:
+            client.connection_pool.connection_kwargs["socket_timeout"] = original_timeout
         return RedisDomainRateLimiter(rate_per_second=rps, redis_client=client)
-    except Exception:
-        logger.warning(
-            "rate_limit_redis_unavailable_falling_back_to_in_memory",
-            exc_info=True,
+    except Exception as exc:
+        # One-line info log — the fallback is by design; we don't want
+        # to spam tracebacks on every manage.py command in dev/CI.
+        logger.info(
+            "rate_limit_redis_unavailable_falling_back_to_in_memory: %s",
+            type(exc).__name__,
         )
         return InMemoryDomainRateLimiter(rate_per_second=rps)

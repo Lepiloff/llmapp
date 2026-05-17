@@ -8,9 +8,9 @@ Architecture refs: docs/architecture.md § 9.3–9.5.
 from __future__ import annotations
 
 import logging
+from difflib import SequenceMatcher
 from typing import Literal
 
-import Levenshtein
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -55,13 +55,25 @@ def unique_slug(hint: str) -> str:
 # ---------------------------------------------------------------------------
 # Deduplication
 # ---------------------------------------------------------------------------
+# Threshold for "essentially the same product name". 0.85 maps to roughly
+# the old Levenshtein distance ≤ 3 cutoff for typical 10-30 char app names
+# while staying pure-stdlib (no C-extension build at deploy time).
+_NAME_SIMILARITY_THRESHOLD = 0.85
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """0..1 similarity ratio using stdlib ``difflib.SequenceMatcher``."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
 def find_soft_duplicate(draft: AppDraft) -> App | None:
     """Look for an existing App that might be the same product."""
     if draft.developer_url:
         for candidate in App.objects.filter(developer_url__iexact=draft.developer_url):
-            if Levenshtein.distance(
-                candidate.name.lower(), draft.name.lower()
-            ) <= 3:
+            if (
+                _name_similarity(candidate.name.lower(), draft.name.lower())
+                >= _NAME_SIMILARITY_THRESHOLD
+            ):
                 return candidate
 
     if draft.install_url:

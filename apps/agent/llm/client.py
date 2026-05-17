@@ -398,6 +398,96 @@ class MockLLMProvider(LLMProvider):
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Provider registry — keyed by ``AGENT_LLM_PROVIDER_*`` env value.
+# Each entry is a builder taking (settings, role, model, cost_prefix) and
+# returning a configured LLMProvider instance.
+#
+# Adding a new provider (Bedrock / Vertex / Mistral-API / ...) is a single
+# new entry below + the concrete LLMProvider subclass — no surgery on the
+# if-elif tree.
+# ---------------------------------------------------------------------------
+def _build_mock(settings, role, model, cost_prefix) -> LLMProvider:
+    return MockLLMProvider(model=model or "mock-model")
+
+
+def _build_anthropic(settings, role, model, cost_prefix) -> LLMProvider:
+    from django.core.exceptions import ImproperlyConfigured
+
+    if not model:
+        raise ImproperlyConfigured(
+            "AGENT_LLM_PROVIDER_*=anthropic requires AGENT_LLM_MODEL_*."
+        )
+    if not settings.ANTHROPIC_API_KEY:
+        raise ImproperlyConfigured(
+            "AGENT_LLM_PROVIDER_*=anthropic requires ANTHROPIC_API_KEY."
+        )
+    return AnthropicProvider(model=model, api_key=settings.ANTHROPIC_API_KEY)
+
+
+def _build_openai(settings, role, model, cost_prefix) -> LLMProvider:
+    from django.core.exceptions import ImproperlyConfigured
+
+    if not model:
+        raise ImproperlyConfigured(
+            "AGENT_LLM_PROVIDER_*=openai requires AGENT_LLM_MODEL_*."
+        )
+    if not settings.OPENAI_API_KEY:
+        raise ImproperlyConfigured(
+            "AGENT_LLM_PROVIDER_*=openai requires OPENAI_API_KEY."
+        )
+    return OpenAIProvider(
+        model=model,
+        api_key=settings.OPENAI_API_KEY,
+        input_cost_per_1m_tokens=float(
+            getattr(settings, f"{cost_prefix}_INPUT_COST_PER_1M_TOKENS", 0) or 0
+        ),
+        cached_input_cost_per_1m_tokens=float(
+            getattr(settings, f"{cost_prefix}_CACHED_COST_PER_1M_TOKENS", 0) or 0
+        ),
+        output_cost_per_1m_tokens=float(
+            getattr(settings, f"{cost_prefix}_OUTPUT_COST_PER_1M_TOKENS", 0) or 0
+        ),
+    )
+
+
+# Map of provider-key → builder. Lower-cased; ``register_provider`` allows
+# third-party providers (or test doubles) to plug in at runtime without
+# editing this module.
+_PROVIDER_REGISTRY: dict[str, Callable[..., LLMProvider]] = {
+    "mock": _build_mock,
+    "anthropic": _build_anthropic,
+    "openai": _build_openai,
+}
+
+
+def register_provider(key: str, builder: Callable[..., LLMProvider]) -> None:
+    """Register a new provider builder under ``key``.
+
+    Builders receive ``(settings, role, model, cost_prefix)`` — same
+    contract as the in-tree entries. Idempotent: re-registering an
+    existing key replaces the previous builder.
+    """
+    _PROVIDER_REGISTRY[key.lower()] = builder
+
+
+def _role_config(settings, role: str) -> tuple[str, str, str]:
+    """Resolve (provider_key, model, cost_prefix) for ``role``."""
+    if role == "primary":
+        return (
+            settings.AGENT_LLM_PROVIDER_PRIMARY,
+            settings.AGENT_LLM_MODEL_PRIMARY,
+            "AGENT_OPENAI_PRIMARY",
+        )
+    if role == "cheap":
+        return (
+            settings.AGENT_LLM_PROVIDER_CHEAP,
+            settings.AGENT_LLM_MODEL_CHEAP,
+            "AGENT_OPENAI_CHEAP",
+        )
+    raise ValueError(f"Unknown LLM role: {role!r}")
+
+
 def build_provider(
     role: str,
     *,
@@ -411,64 +501,23 @@ def build_provider(
 
     Raises ``ImproperlyConfigured`` if a real provider is requested but
     its API key is empty — much better than a 401 surface from inside
-    a worker task at runtime.
+    a worker task at runtime. Unknown ``AGENT_LLM_PROVIDER_*`` values
+    raise too, so a typo doesn't silently fall through to mock.
     """
     from django.conf import settings as django_settings
     from django.core.exceptions import ImproperlyConfigured
 
     settings = settings_module or django_settings
-
-    if role == "primary":
-        provider_key = settings.AGENT_LLM_PROVIDER_PRIMARY
-        model = settings.AGENT_LLM_MODEL_PRIMARY
-        cost_prefix = "AGENT_OPENAI_PRIMARY"
-    elif role == "cheap":
-        provider_key = settings.AGENT_LLM_PROVIDER_CHEAP
-        model = settings.AGENT_LLM_MODEL_CHEAP
-        cost_prefix = "AGENT_OPENAI_CHEAP"
-    else:
-        raise ValueError(f"Unknown LLM role: {role!r}")
-
+    provider_key, model, cost_prefix = _role_config(settings, role)
     provider_key = (provider_key or "mock").lower()
 
-    if provider_key == "mock":
-        return MockLLMProvider(model=model or "mock-model")
-
-    if provider_key == "anthropic":
-        if not model:
-            raise ImproperlyConfigured(
-                "AGENT_LLM_PROVIDER_*=anthropic requires AGENT_LLM_MODEL_*."
-            )
-        if not settings.ANTHROPIC_API_KEY:
-            raise ImproperlyConfigured(
-                "AGENT_LLM_PROVIDER_*=anthropic requires ANTHROPIC_API_KEY."
-            )
-        return AnthropicProvider(model=model, api_key=settings.ANTHROPIC_API_KEY)
-
-    if provider_key == "openai":
-        if not model:
-            raise ImproperlyConfigured(
-                "AGENT_LLM_PROVIDER_*=openai requires AGENT_LLM_MODEL_*."
-            )
-        if not settings.OPENAI_API_KEY:
-            raise ImproperlyConfigured(
-                "AGENT_LLM_PROVIDER_*=openai requires OPENAI_API_KEY."
-            )
-        return OpenAIProvider(
-            model=model,
-            api_key=settings.OPENAI_API_KEY,
-            input_cost_per_1m_tokens=float(
-                getattr(settings, f"{cost_prefix}_INPUT_COST_PER_1M_TOKENS", 0) or 0
-            ),
-            cached_input_cost_per_1m_tokens=float(
-                getattr(settings, f"{cost_prefix}_CACHED_COST_PER_1M_TOKENS", 0) or 0
-            ),
-            output_cost_per_1m_tokens=float(
-                getattr(settings, f"{cost_prefix}_OUTPUT_COST_PER_1M_TOKENS", 0) or 0
-            ),
+    builder = _PROVIDER_REGISTRY.get(provider_key)
+    if builder is None:
+        raise ImproperlyConfigured(
+            f"Unknown LLM provider key: {provider_key!r}. "
+            f"Known: {sorted(_PROVIDER_REGISTRY)}."
         )
-
-    raise ImproperlyConfigured(f"Unknown LLM provider key: {provider_key!r}")
+    return builder(settings, role, model, cost_prefix)
 
 
 # ---------------------------------------------------------------------------

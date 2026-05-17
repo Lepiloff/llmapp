@@ -11,7 +11,7 @@ bootstrap.
 
 ---
 
-## Status snapshot — 2026-05-17 (Sprint 2)
+## Status snapshot — 2026-05-17 (Sprint 3)
 
 * **Phase 0** — MCP Registry ingest stabilized. ✅
 * **Phase 1 + 1b** — LLM enrichment for existing DRAFTs, real OpenAI
@@ -36,10 +36,17 @@ bootstrap.
 * **Sprint 2 — P2 follow-on (2026-05-17)** ✅ — closed 7 P2 findings:
   /go/ rate-limit, WhiteNoise prod static, capability evidence
   200→500, MCP Registry 404 → Sentry, HEAD→GET link-check fallback,
-  UseCase merge admin tool, SLA dashboard for review queue. 303
-  tests passing (+28). Only F1 (Anthropic provider, policy-deferred)
-  and B3 (official directories, ToS-gated) remain in the
-  open-findings list.
+  UseCase merge admin tool, SLA dashboard for review queue.
+* **Sprint 3 — P3 polish (2026-05-17)** ✅ — closed 8 P3 items:
+  GitHub Actions CI, pg_backup compose service, provider-registry
+  refactor, TrendingScore now drives `qs.trending()`, public
+  read-only API (django-ninja at /api/v1/*), CSP middleware with
+  per-request nonce, Levenshtein→difflib, `description.txt` moved
+  to `docs/origin-brainstorm-ru.md`. Bonus: Redis-ping startup
+  warning quieted (1s timeout, info-level). 331 tests passing
+  (+25). Only F1 (Anthropic provider, policy-deferred) and B3
+  (official directories, ToS-gated) remain in the open-findings
+  list.
 
 **Catalog state right now:**
 
@@ -850,6 +857,97 @@ after a second-pass review:
    `_sla_pending_days()` helper that reads it at request time, and
    documented the env in `.env.example`. Regression:
    `test_sla_window_honors_settings_override`.
+
+---
+
+## Sprint 3 — P3 polish (2026-05-17) ✅
+
+Sprint 2 closed the operational-surface tightening. Sprint 3
+picks up the P3 backlog — items that aren't release blockers but
+make the codebase pleasant for the next round of work. 306 → 331
+passing tests.
+
+**P3.16 — GitHub Actions CI.**
+`.github/workflows/ci.yml` runs on push/PR: ruff lint,
+`makemigrations --check --dry-run`, pytest with Postgres+Redis
+service containers, prod-settings boot smoke check. Concurrency
+group cancels superseded runs. Previously every PR was hand-tested
+locally; now the type-check / migration-drift / test-suite gate is
+automatic.
+
+**P3.17 — pg_backup compose service.**
+New `docker-compose.yml` service (production profile only) runs
+`docker/pg_backup.sh` in a loop: pg_dump on
+`PG_BACKUP_INTERVAL_SECONDS` (24h default), gzip, optional S3
+upload, trim local copies older than
+`PG_BACKUP_RETENTION_DAYS` (14d default). Uses postgres:16 image
++ apt-installs aws-cli on container start so the same image
+handles both dump and upload. Env documented in `.env.production`;
+the local `pg_backups` named volume keeps the rolling window
+even when S3 is unconfigured.
+
+**P3.21 — Provider-registry pattern.**
+`apps/agent/llm/client.py::build_provider` no longer if-elif'd by
+provider key. Now keyed off `_PROVIDER_REGISTRY: dict[str,
+Builder]` with `register_provider(key, builder)` for third-party
+hooks (Bedrock, Vertex, Mistral, future Claude variants…) and
+test doubles. Unknown keys raise `ImproperlyConfigured` listing
+the known set instead of silently falling through. Regressions:
+`tests/agent/test_provider_registry.py` (+6).
+
+**P3.24 — TrendingScore wired into `AppQuerySet.trending`.**
+`calculate_trending_scores` ran daily but the homepage was still
+using a live `Count("clicks", filter=…)` per request (O(clicks ×
+apps), grows with traffic). `AppQuerySet.trending(window_days)`
+now annotates from `analytics.TrendingScore.score_{1d,7d,30d}` via
+`Coalesce(..., 0.0)` so apps with no score yet sort to the bottom
+and tiebreak on `quality_score`. Predictable query cost at any
+catalog size; freshness window is whatever the beat task gives us
+(currently daily, can be shortened later without code change).
+Regressions: `tests/catalog/test_trending_score.py` (+5).
+
+**P3.18 — Public read-only API (django-ninja).**
+New `apps/catalog/api.py` exposes `/api/v1/apps/`,
+`/api/v1/apps/<slug>/`, `/api/v1/platforms/`, `/api/v1/categories/`
+with OpenAPI/Swagger at `/api/v1/docs`. Reads through
+`App.published` so deprecated / hidden / draft cards never leak;
+pagination clamped to 100 items per page; capabilities filtered to
+non-unknown only. No auth (read-only, public-by-design — same data
+the public HTML pages render). Regressions:
+`tests/catalog/test_public_api.py` (+9).
+
+**P3.20 — Content-Security-Policy middleware.**
+`apps/core/csp.py::CSPMiddleware` adds a strict CSP header to every
+prod response: `default-src 'self'`, Turnstile origin allowlisted
+for `script-src` / `frame-src` / `connect-src`, per-request nonce
+on `request.csp_nonce` for unavoidable inline `<script>` tags.
+`frame-ancestors 'none'` + `object-src 'none'` round out the
+defence-in-depth surface. Dev settings leave it off because
+debug-toolbar conflicts with strict CSP; this is a prod-only layer.
+Regressions: `tests/core/test_csp.py` (+5).
+
+**P3.22 — Levenshtein → difflib.**
+`apps/sources/upsert.py::find_soft_duplicate` no longer needs the
+`python-Levenshtein` C-extension. `_name_similarity()` wraps
+`difflib.SequenceMatcher.ratio()` (stdlib); threshold 0.85 matches
+the previous distance-≤-3 cutoff on typical 10-30 char app names.
+Removes a binary-wheel from the Docker build and simplifies CI.
+
+**P3.23 — `description.txt` relocated.**
+Top-level 1407-line brainstorm doc moved to
+`docs/origin-brainstorm-ru.md`. Keeps the repo root clean and
+makes the doc discoverable next to other Russian-language design
+notes.
+
+**Bonus: Redis-ping startup warning quieted.**
+`AgentConfig.ready()` invokes `build_limiter_from_settings()` on
+every `manage.py` invocation. When Redis was unreachable
+(dev/CI host), the default redis-py ping retried for ~20s and
+dumped a full traceback per command. Fix: short
+`socket_timeout=1.0` for the startup probe, info-level one-line
+log on fallback. Worker / web containers (Redis reachable) hit
+single-digit-ms; dev commands no longer wait or scroll the
+terminal with tracebacks.
 
 ---
 

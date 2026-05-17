@@ -45,11 +45,15 @@ CORS_ALLOW_ALL_ORIGINS = False
 # top (nginx terminates TLS and proxies, WhiteNoise handles the static MIME
 # layer). The middleware MUST sit immediately after SecurityMiddleware per
 # WhiteNoise docs.
+#
+# CSPMiddleware sits at the END of the chain so its response header isn't
+# stripped by other middleware that mutate the response in-flight.
 _security_idx = MIDDLEWARE.index("django.middleware.security.SecurityMiddleware")
 MIDDLEWARE = (
     MIDDLEWARE[: _security_idx + 1]
     + ["whitenoise.middleware.WhiteNoiseMiddleware"]
     + MIDDLEWARE[_security_idx + 1 :]
+    + ["apps.core.csp.CSPMiddleware"]
 )
 
 STORAGES = {

@@ -98,7 +98,42 @@ services:
     profiles:
       - production
 
+  # Periodic pg_dump runner. Production-only profile so dev / CI don't
+  # spin it up. Dumps land in the pg_backups named volume; if
+  # PG_BACKUP_S3_BUCKET is configured (with AWS creds), the script also
+  # uploads each dump there before trimming local retention to
+  # PG_BACKUP_RETENTION_DAYS (default 14).
+  pg_backup:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      PG_BACKUP_DIR: /backups
+      PG_BACKUP_RETENTION_DAYS: ${PG_BACKUP_RETENTION_DAYS:-14}
+      PG_BACKUP_INTERVAL_SECONDS: ${PG_BACKUP_INTERVAL_SECONDS:-86400}
+      PG_BACKUP_S3_BUCKET: ${PG_BACKUP_S3_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - ./docker/pg_backup.sh:/usr/local/bin/pg_backup.sh:ro
+      - pg_backups:/backups
+    entrypoint: ["/bin/bash", "-c"]
+    # Install aws-cli once on container start (small; postgres:16 image
+    # has apt). pg_dump is already in the image. Then exec the loop.
+    command:
+      - |
+        apt-get update -qq >/dev/null
+        apt-get install -y --no-install-recommends awscli python3 >/dev/null
+        exec /usr/local/bin/pg_backup.sh
+    restart: unless-stopped
+    profiles:
+      - production
+
 volumes:
   pgdata:
   media_files:
   static_files:
+  pg_backups:
