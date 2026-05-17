@@ -1,0 +1,24 @@
+# Backup runner image. Baked-in pg_dump (from postgres:16 base) plus the
+# aws CLI — no apt-install on container start, so a slow / restricted
+# Debian mirror during an incident doesn't keep backups from running.
+FROM postgres:16
+
+# awscli + ca-certificates from apt. We deliberately use the system
+# python3 + pip path bundled with the image (postgres:16 ships python3),
+# install awscli v1 (small wheel, no python3-venv requirement), and clean
+# the apt cache.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        awscli; \
+    rm -rf /var/lib/apt/lists/*
+
+# Inline copy here so `docker compose build pg_backup` doesn't need a
+# separate context. The script itself is also bind-mounted at runtime so
+# operators can patch it without rebuilding the image — same behaviour
+# as the live entrypoint pattern in the rest of the stack.
+COPY pg_backup.sh /usr/local/bin/pg_backup.sh
+RUN chmod +x /usr/local/bin/pg_backup.sh
+
+ENTRYPOINT ["/usr/local/bin/pg_backup.sh"]

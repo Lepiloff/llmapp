@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Periodic pg_dump for the prod-profile pg_backup container.
 # Loops forever: dump → upload (optional) → trim retention → sleep.
-# Reads the same DATABASE_URL the rest of the stack uses.
+# Reads the same DATABASE_URL the rest of the stack uses; pg_dump 16+
+# accepts a postgresql://… URL directly, so we don't have to parse and
+# re-emit shell `export` statements (which corrupts passwords containing
+# spaces, `#`, `$`, quotes, or percent-encoded chars).
 set -euo pipefail
 
 : "${DATABASE_URL:?DATABASE_URL is required}"
@@ -11,20 +14,6 @@ set -euo pipefail
 
 mkdir -p "$PG_BACKUP_DIR"
 
-# Parse DATABASE_URL into PG* env vars expected by pg_dump.
-python3 - <<'PY' > /tmp/pg_env
-import os
-from urllib.parse import urlparse
-u = urlparse(os.environ["DATABASE_URL"])
-print(f"export PGHOST={u.hostname}")
-print(f"export PGPORT={u.port or 5432}")
-print(f"export PGUSER={u.username}")
-print(f"export PGPASSWORD={u.password}")
-print(f"export PGDATABASE={u.path.lstrip('/')}")
-PY
-# shellcheck disable=SC1091
-source /tmp/pg_env
-
 echo "🔁 pg_backup loop: dir=$PG_BACKUP_DIR retention=${PG_BACKUP_RETENTION_DAYS}d interval=${PG_BACKUP_INTERVAL_SECONDS}s"
 
 while true; do
@@ -32,8 +21,11 @@ while true; do
     out="$PG_BACKUP_DIR/llmmarket-${ts}.sql.gz"
 
     echo "📦 dumping → $out"
+    # Pass DATABASE_URL straight to pg_dump. libpq parses the URI itself,
+    # so percent-encoded chars in the password are honored without going
+    # through a shell-quoting layer.
     if pg_dump --no-owner --no-privileges --clean --if-exists \
-        "$PGDATABASE" 2>/dev/null | gzip -9 > "$out.tmp"; then
+        "$DATABASE_URL" 2>/dev/null | gzip -9 > "$out.tmp"; then
         mv "$out.tmp" "$out"
         echo "✅ dump complete ($(du -h "$out" | cut -f1))"
     else
@@ -45,12 +37,16 @@ while true; do
     # local dump is retained either way so a misconfigured upload doesn't
     # cost us forensics.
     if [[ -n "${PG_BACKUP_S3_BUCKET:-}" && -f "$out" ]]; then
-        echo "☁️  uploading to s3://$PG_BACKUP_S3_BUCKET/"
-        if aws s3 cp "$out" "s3://$PG_BACKUP_S3_BUCKET/$(basename "$out")" \
-            --only-show-errors; then
-            echo "✅ s3 upload complete"
+        if command -v aws >/dev/null 2>&1; then
+            echo "☁️  uploading to s3://$PG_BACKUP_S3_BUCKET/"
+            if aws s3 cp "$out" "s3://$PG_BACKUP_S3_BUCKET/$(basename "$out")" \
+                --only-show-errors; then
+                echo "✅ s3 upload complete"
+            else
+                echo "❌ s3 upload failed — local copy preserved"
+            fi
         else
-            echo "❌ s3 upload failed — local copy preserved"
+            echo "⚠️  PG_BACKUP_S3_BUCKET set but 'aws' CLI not present — skipping upload"
         fi
     fi
 

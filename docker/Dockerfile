@@ -15,12 +15,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml /app/
-RUN pip install --upgrade pip && \
-    pip install "Django>=5.0,<6.0" "psycopg[binary]>=3.1,<4.0" python-decouple dj-database-url \
-    "celery>=5.3,<6.0" django-celery-beat redis django-redis requests python-Levenshtein django-ratelimit \
-    django-cors-headers sentry-sdk python-json-logger gunicorn Pillow "openai>=1.50,<2.0"
+# Install Python dependencies from pyproject.toml. Single source of
+# truth — historically this Dockerfile carried a hand-curated list
+# that drifted: WhiteNoise (Sprint 2) and django-ninja (Sprint 3)
+# never made it in, while python-Levenshtein lingered after Sprint 3
+# removed it. Using `pip install .` keeps the image deps locked to
+# whatever pyproject.toml declares; CI also installs the same list so
+# drift is impossible.
+#
+# README.md is referenced by pyproject.toml.readme — copy it first so
+# the install step doesn't break when the rest of the source is later
+# COPY'd in (and so this layer doesn't bust on unrelated code edits).
+COPY pyproject.toml README.md /app/
+RUN pip install --upgrade pip && pip install .
 
 # Copy application code
 COPY . /app/

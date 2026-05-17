@@ -103,8 +103,16 @@ services:
   # PG_BACKUP_S3_BUCKET is configured (with AWS creds), the script also
   # uploads each dump there before trimming local retention to
   # PG_BACKUP_RETENTION_DAYS (default 14).
+  #
+  # Uses a pre-built image (docker/Dockerfile.pg_backup) with both
+  # pg_dump and awscli baked in. Avoids the previous pattern of
+  # apt-installing at container start, which would block the service
+  # when Debian mirrors are slow/down during an incident — exactly the
+  # window we need backups the most.
   pg_backup:
-    image: postgres:16
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.pg_backup
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,16 +126,10 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
     volumes:
+      # Bind-mount the script on top of the image's copy so operators
+      # can patch retention / interval logic without rebuilding.
       - ./docker/pg_backup.sh:/usr/local/bin/pg_backup.sh:ro
       - pg_backups:/backups
-    entrypoint: ["/bin/bash", "-c"]
-    # Install aws-cli once on container start (small; postgres:16 image
-    # has apt). pg_dump is already in the image. Then exec the loop.
-    command:
-      - |
-        apt-get update -qq >/dev/null
-        apt-get install -y --no-install-recommends awscli python3 >/dev/null
-        exec /usr/local/bin/pg_backup.sh
     restart: unless-stopped
     profiles:
       - production

@@ -31,7 +31,7 @@
 
   {# ---------- Tailwind via Play CDN (zero-config; production should compile) ---------- #}
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
-  <script>
+  <script{% if request.csp_nonce %} nonce="{{ request.csp_nonce }}"{% endif %}>
     /* Neural Grid design tokens */
     tailwind.config = {
       darkMode: 'class',
@@ -77,7 +77,7 @@
   {% block extra_head %}{% endblock %}
 
   {# ---------- Site-wide JSON-LD ---------- #}
-  <script type="application/ld+json">
+  <script type="application/ld+json"{% if request.csp_nonce %} nonce="{{ request.csp_nonce }}"{% endif %}>
   {
     "@context": "https://schema.org",
     "@type": "WebSite",

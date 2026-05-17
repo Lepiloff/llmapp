@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "llmmarket"
 version = "0.1.0"
@@ -45,6 +49,14 @@ dev = [
   "django-debug-toolbar>=4.4",
   "freezegun>=1.5",
 ]
+
+# The project is a Django site, not a distributable Python package —
+# code lives at the repo root (`apps/`, `config/`) and Django picks it up
+# via cwd / WORKDIR. We declare an empty package list so `pip install .`
+# resolves and installs declared dependencies without trying to build a
+# wheel that contains our application modules.
+[tool.setuptools]
+packages = []
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.dev"

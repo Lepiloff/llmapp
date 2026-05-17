@@ -949,6 +949,60 @@ log on fallback. Worker / web containers (Redis reachable) hit
 single-digit-ms; dev commands no longer wait or scroll the
 terminal with tracebacks.
 
+**Sprint 3 follow-up (post-review fixes, same day):**
+Second-pass review surfaced four issues — two prod-blockers and
+two backup-script defects. All addressed here.
+
+1. **Docker image dep drift (P1).** `docker/Dockerfile` had a
+   hand-curated `pip install` list that drifted: WhiteNoise
+   (Sprint 2) and django-ninja (Sprint 3) were missing, and
+   python-Levenshtein (removed Sprint 3) was still there. CI
+   was green because it installs from `pyproject.toml` via
+   `pip install -e ".[dev]"`. Fix: Dockerfile now does
+   `pip install .` against the same `pyproject.toml`; added a
+   `build-system` block + `[tool.setuptools] packages = []` so
+   the install resolves cleanly without trying to package our
+   Django site as a wheel. CI workflow gained a `docker-build`
+   job that builds the image AND runs an in-image import smoke
+   (`import apps.catalog.api, whitenoise.middleware,
+   apps.core.csp`) so drift can never recur silently.
+2. **CSP blocked the actual frontend (P1).** Initial CSP policy
+   only allowed scripts from 'self', nonce, and the Turnstile
+   origin. `templates/base.html` loads Tailwind play-CDN, htmx,
+   Alpine.js, Google Fonts CSS + .woff2 files, and has inline
+   Tailwind-config and JSON-LD blocks. In prod everything except
+   Turnstile was being blocked. Fix: `script-src` now lists
+   `cdn.tailwindcss.com` + `unpkg.com`; `style-src` adds
+   `fonts.googleapis.com`; `font-src` adds `fonts.gstatic.com`;
+   `img-src` opened to `https:` for third-party logo URLs. Inline
+   `<script>` blocks in `base.html` gained
+   `nonce="{{ request.csp_nonce }}"`. Vendoring htmx/Alpine/Tailwind
+   under /static/ stays as a future tightening pass — for now we
+   prefer "works in prod" over "tightest CSP".
+3. **pg_backup unsafe URL parsing (P2).** The original script
+   sourced a generated `/tmp/pg_env` with unquoted `export`
+   lines built from a URL parse. A password containing `#`, `$`,
+   `&`, quotes, or percent-encoded characters could fail to
+   source, authenticate wrong, or execute shell. Fix: pass the
+   raw `DATABASE_URL` string straight to `pg_dump` (libpq parses
+   the URI itself, percent-decoding included). No shell quoting
+   layer at all.
+4. **pg_backup apt-install on every restart (P2).** Original
+   compose entry ran `apt-get update && apt-get install awscli
+   python3` at container start. During an incident with slow /
+   blocked Debian mirrors the backup service couldn't start
+   exactly when we needed it. Fix: dedicated `docker/Dockerfile.pg_backup`
+   built ahead of time with `pg_dump` + `awscli` baked in;
+   compose service now uses `build: docker/Dockerfile.pg_backup`.
+   Container starts immediately, no network dependency at boot.
+   The bind-mount on `pg_backup.sh` is preserved so operators can
+   patch the loop without rebuilding the image. The script also
+   degrades gracefully when `aws` is missing (logs a warning and
+   skips upload) so a partial mis-config doesn't kill the local
+   backup chain.
+
+Total after follow-up: 332 passing (+1 CSP regression).
+
 ---
 
 ## Next plan (priority order)

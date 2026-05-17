@@ -86,3 +86,30 @@ jobs:
           ALLOWED_HOSTS: example.com
           CORS_ALLOWED_ORIGINS: https://example.com
         run: python -c "import django; django.setup(); print('prod settings boot OK')"
+
+  docker-build:
+    name: Docker image build smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: llmmarket-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-check that runtime imports resolve
+        run: |
+          docker run --rm \
+            -e DJANGO_SETTINGS_MODULE=config.settings.dev \
+            -e DATABASE_URL=postgres://x:x@127.0.0.1:5432/x \
+            -e SECRET_KEY=ci-build-smoke \
+            --entrypoint python \
+            llmmarket-web:ci \
+            -c "import apps.catalog.api, whitenoise.middleware, apps.core.csp; print('runtime imports OK')"
