@@ -100,10 +100,11 @@ class MCPRegistrySource(BaseSource):
                     timeout=30,
                 )
                 resp.raise_for_status()
-            except requests.RequestException:
+            except requests.RequestException as exc:
                 logger.exception(
                     "mcp_registry_page_fetch_failed", extra={"cursor": cursor}
                 )
+                _report_to_sentry(exc, base_url=self.base_url, cursor=cursor)
                 return
 
             # The Registry is preview status (business.md § 13.4): every
@@ -229,4 +230,46 @@ class MCPRegistrySource(BaseSource):
                 "install_command": install.get("command"),
                 "required_env_vars": install.get("env", []) or [],
             },
+        )
+
+
+def _report_to_sentry(
+    exc: requests.RequestException,
+    *,
+    base_url: str,
+    cursor: str | None,
+) -> None:
+    """Surface MCP Registry outages in Sentry without spamming the issue list.
+
+    A persistent 404 on the registry endpoint (e.g. upstream moved the URL
+    or shut the API down) was previously invisible — the task counter
+    returned zero, beat kept firing, no one noticed. We now capture each
+    fetch failure into Sentry with a stable ``fingerprint`` so the issue
+    coalesces into a single group across daily reruns, and tag the HTTP
+    status when known.
+
+    Soft dependency: ``sentry_sdk`` is only used when configured (DSN set).
+    The import is local because the module imports cleanly without it.
+    """
+    try:
+        import sentry_sdk
+    except ImportError:  # pragma: no cover - sentry-sdk is in pyproject
+        return
+
+    status_code = None
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+
+    with sentry_sdk.new_scope() as scope:
+        scope.fingerprint = ["mcp-registry-unreachable", str(status_code or "transport")]
+        scope.set_tag("component", "mcp_registry_ingest")
+        scope.set_tag("http_status", str(status_code) if status_code else "unknown")
+        scope.set_context(
+            "mcp_registry",
+            {"base_url": base_url, "cursor": cursor, "error_class": type(exc).__name__},
+        )
+        sentry_sdk.capture_message(
+            f"MCP Registry fetch failed ({status_code or 'transport error'})",
+            level="warning",
         )

@@ -406,7 +406,10 @@ class AppCapability(models.Model):
         choices=CapabilityValue.choices,
         default=CapabilityValue.UNKNOWN,
     )
-    note = models.CharField(max_length=200, blank=True)
+    # LLM-supplied evidence quote backing a yes/no value. 500 chars covers
+    # most README sentences without truncating mid-citation; was 200 (too
+    # short — frequently cut in half).
+    note = models.CharField(max_length=500, blank=True)
 
     class Meta:
         unique_together = ("app", "capability")

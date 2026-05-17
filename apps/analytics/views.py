@@ -10,6 +10,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, Http404
 from django.shortcuts import get_object_or_404
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
+from django_ratelimit.decorators import ratelimit
 
 from apps.catalog.models import App
 from .models import ClickEvent, PageView
@@ -18,8 +19,17 @@ from .utils import get_client_ip, get_session_key
 logger = logging.getLogger(__name__)
 
 
+# Per-IP rate cap on outbound redirects. The endpoint writes one ClickEvent
+# per request and feeds the trending score; without a cap an attacker can
+# inflate trending rankings or simply fill the DB. 60/min is generous for
+# real users (you'd need to click 60 links/minute to hit it) and tight
+# enough that scripted abuse is throttled.
+_OUTBOUND_RATE = "60/m"
+
+
 @never_cache
 @require_http_methods(["GET"])
+@ratelimit(key="ip", rate=_OUTBOUND_RATE, method="GET", block=True)
 def outbound_redirect(request: HttpRequest, slug: str) -> HttpResponse:
     """Tracked outbound redirect for app links.
 

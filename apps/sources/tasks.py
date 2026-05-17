@@ -133,6 +133,41 @@ def check_app_links_batch(batch_size: int = 50) -> dict[str, int]:
         raise
 
 
+# Status codes that signal "HEAD not supported" — fall back to a tiny GET.
+# 405 Method Not Allowed and 501 Not Implemented are the canonical ones;
+# 403 sometimes appears on CDNs that block HEAD specifically. Anything
+# else (incl. 4xx that say "page is gone") is taken at face value.
+_HEAD_REJECT_CODES = {403, 405, 501}
+
+
+def _probe_url(url: str) -> int:
+    """Return the effective HTTP status for ``url``.
+
+    Strategy: HEAD first (cheap), fall back to a 1KB GET when the
+    server rejects HEAD. Many modern SaaS endpoints (and a non-zero
+    number of GitHub Pages sites) return 405/501 for HEAD even though
+    the URL is perfectly live; without a fallback, those URLs would
+    accumulate consecutive_failures and trip auto-deprecation after 7
+    cycles. The GET fallback caps the response size with a Range
+    header so we don't pull the full page.
+    """
+    head = requests.head(url, timeout=10, allow_redirects=True)
+    if head.status_code not in _HEAD_REJECT_CODES:
+        return head.status_code
+
+    get = requests.get(
+        url,
+        timeout=10,
+        allow_redirects=True,
+        headers={"Range": "bytes=0-1023"},
+        stream=True,
+    )
+    try:
+        return get.status_code
+    finally:
+        get.close()
+
+
 def _check_app_links(app: App) -> None:
     """Check all links for a single app and update LinkHealth."""
     links_to_check = [
@@ -151,19 +186,19 @@ def _check_app_links(app: App) -> None:
 
         try:
             start_time = timezone.now()
-            response = requests.head(url, timeout=10, allow_redirects=True)
+            status_code = _probe_url(url)
             duration_ms = int((timezone.now() - start_time).total_seconds() * 1000)
 
             check_result = LinkCheckResult.objects.create(
                 app=app,
                 target=link_type,
                 url=url,
-                status_code=response.status_code,
-                ok=response.status_code < 400,
+                status_code=status_code,
+                ok=status_code < 400,
                 duration_ms=duration_ms,
             )
 
-            _update_link_health(app, link_type, url, check_result.ok, response.status_code)
+            _update_link_health(app, link_type, url, check_result.ok, status_code)
 
         except Exception as e:
             LinkCheckResult.objects.create(

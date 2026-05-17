@@ -153,6 +153,12 @@ class LLMCallLogAdmin(admin.ModelAdmin):
         return False
 
 
+# SLA threshold for the oldest pending entry. Configurable via Django
+# settings if operators want it tighter; default is 14 days, matching the
+# editor-cadence acceptance criteria from docs/agent-pipeline.md Phase 1.
+SLA_PENDING_DAYS = 14
+
+
 @admin.register(NeedsReviewQueueEntry)
 class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
     change_form_template = "admin/agent/needsreviewqueueentry/change_form.html"
@@ -207,6 +213,86 @@ class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
         ),
     )
     date_hierarchy = "created_at"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "sla-dashboard/",
+                self.admin_site.admin_view(self.sla_dashboard_view),
+                name="agent_needsreviewqueueentry_sla_dashboard",
+            ),
+        ]
+        return custom + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["sla_dashboard_url"] = reverse(
+            "admin:agent_needsreviewqueueentry_sla_dashboard"
+        )
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def sla_dashboard_view(self, request: HttpRequest):
+        """One-page editor SLA snapshot.
+
+        Reports: oldest pending entry age, count of overdue entries
+        (created > SLA_PENDING_DAYS ago and still unresolved),
+        breakdown by kind, top-N oldest pending entries with links.
+        Editors and oncall folks use this to gauge whether the agent
+        backlog is healthy without having to filter the changelist by
+        hand. The view is intentionally compact — one short SQL
+        round-trip per panel.
+        """
+        from django.db.models import F
+
+        now = timezone.now()
+        sla_cutoff = now - timedelta(days=SLA_PENDING_DAYS)
+
+        pending = NeedsReviewQueueEntry.objects.filter(resolved_at__isnull=True)
+        pending_count = pending.count()
+        overdue_count = pending.filter(created_at__lt=sla_cutoff).count()
+
+        oldest = pending.order_by("created_at").first()
+        oldest_age_days = (
+            (now - oldest.created_at).days if oldest else 0
+        )
+
+        by_kind = dict(
+            pending.values("kind")
+            .annotate(c=Count("id"))
+            .values_list("kind", "c")
+        )
+
+        top_oldest = list(
+            pending.select_related("app")
+            .order_by("created_at")[:10]
+            .values("pk", "app__name", "app__slug", "kind", "created_at")
+        )
+        for entry in top_oldest:
+            entry["age_days"] = (now - entry["created_at"]).days
+            entry["overdue"] = entry["created_at"] < sla_cutoff
+            entry["url"] = reverse(
+                "admin:agent_needsreviewqueueentry_change",
+                args=[entry["pk"]],
+            )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Editor review SLA dashboard",
+            "opts": self.model._meta,
+            "sla_days": SLA_PENDING_DAYS,
+            "pending_count": pending_count,
+            "overdue_count": overdue_count,
+            "oldest_age_days": oldest_age_days,
+            "by_kind": sorted(by_kind.items()),
+            "top_oldest": top_oldest,
+            "is_healthy": overdue_count == 0,
+        }
+        return render(
+            request,
+            "admin/agent/needsreviewqueueentry/sla_dashboard.html",
+            context,
+        )
 
     def get_queryset(self, request):
         return (

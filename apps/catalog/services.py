@@ -177,6 +177,73 @@ def transition_to_published(app: App, editor) -> None:
 
 
 @transaction.atomic
+def merge_use_cases(
+    target_id: int, source_ids: Iterable[int]
+) -> dict[str, int]:
+    """Collapse one or more ``UseCase`` rows into ``target_id``.
+
+    For every ``AppUseCase`` whose ``use_case`` is in ``source_ids``,
+    re-point the row at ``target_id`` (or drop it if the target row
+    already exists for that App — ``AppUseCase`` has a unique-together
+    on ``(app, use_case)`` so duplicates can't coexist). Then delete
+    the source ``UseCase`` rows. Returns counters for admin feedback.
+
+    LLM-driven enrichment creates a long tail of near-synonym
+    use-cases (``"Generate sales reports"`` vs ``"Sales report
+    generation"`` vs ``"Generate a sales report"``) — three distinct
+    slugs for one editorial concept. Without this tool the
+    ``UseCase`` taxonomy bloats and faceted browsing becomes useless.
+    """
+    from .models import AppUseCase, UseCase
+
+    source_ids = [int(pk) for pk in source_ids if int(pk) != target_id]
+    if not source_ids:
+        return {"reassigned": 0, "deduplicated": 0, "deleted_use_cases": 0}
+
+    # PKs of UseCases that actually exist (drop bogus IDs silently
+    # rather than 500ing the admin action).
+    existing_target = UseCase.objects.filter(pk=target_id).exists()
+    if not existing_target:
+        raise ValueError(f"Target UseCase {target_id} does not exist")
+
+    valid_source_ids = list(
+        UseCase.objects.filter(pk__in=source_ids).values_list("pk", flat=True)
+    )
+    if not valid_source_ids:
+        return {"reassigned": 0, "deduplicated": 0, "deleted_use_cases": 0}
+
+    # Apps that already have the target — for those, source rows are
+    # simply deleted (no point re-pointing into a duplicate that
+    # unique_together would reject).
+    apps_with_target = set(
+        AppUseCase.objects.filter(use_case_id=target_id).values_list("app_id", flat=True)
+    )
+
+    source_rows = AppUseCase.objects.select_for_update().filter(
+        use_case_id__in=valid_source_ids
+    )
+
+    reassigned = 0
+    deduplicated = 0
+    for row in source_rows:
+        if row.app_id in apps_with_target:
+            row.delete()
+            deduplicated += 1
+        else:
+            row.use_case_id = target_id
+            row.save(update_fields=["use_case"])
+            apps_with_target.add(row.app_id)
+            reassigned += 1
+
+    deleted_use_cases, _ = UseCase.objects.filter(pk__in=valid_source_ids).delete()
+    return {
+        "reassigned": reassigned,
+        "deduplicated": deduplicated,
+        "deleted_use_cases": deleted_use_cases,
+    }
+
+
+@transaction.atomic
 def recalc_quality_score_bulk(app_ids: Iterable[int]) -> int:
     """Recompute quality for a set of apps. Returns the number of changes.
 

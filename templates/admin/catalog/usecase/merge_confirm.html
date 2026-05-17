@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block content %}
+<form method="post">{% csrf_token %}
+  <p>
+    You selected {{ queryset.count }} use-cases. Pick the one that
+    should remain &mdash; every <code>AppUseCase</code> currently
+    pointing at the others will be re-pointed at it, and the source
+    rows will be deleted.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Keep</th><th>Title</th><th>Slug</th><th>Apps</th></tr>
+    </thead>
+    <tbody>
+      {% for uc in queryset %}
+      <tr>
+        <td><input type="radio" name="target" value="{{ uc.pk }}"
+            {% if forloop.first %}checked{% endif %}></td>
+        <td>{{ uc.title }}</td>
+        <td><code>{{ uc.slug }}</code></td>
+        <td>{{ uc.apps.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% for uc in queryset %}
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ uc.pk }}">
+  {% endfor %}
+  <input type="hidden" name="action" value="merge_into_target">
+  <input type="hidden" name="post" value="yes">
+
+  <p>
+    <input type="submit" class="default" value="Merge into selected">
+    <a href="../">Cancel</a>
+  </p>
+</form>
+{% endblock %}

@@ -561,14 +561,14 @@ def _apply_capability_updates(app_id: int, plan: Plan) -> list[str]:
                 )
                 continue
             existing_row.value = upd.value
-            existing_row.note = (upd.evidence or "")[:200]
+            existing_row.note = (upd.evidence or "")[:500]
             existing_row.save(update_fields=["value", "note"])
         else:
             AppCapability.objects.create(
                 app_id=app_id,
                 capability=cap_obj,
                 value=upd.value,
-                note=(upd.evidence or "")[:200],
+                note=(upd.evidence or "")[:500],
             )
         applied.append(upd.key)
     return applied

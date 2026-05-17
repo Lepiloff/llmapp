@@ -97,9 +97,85 @@ class CapabilityAdmin(admin.ModelAdmin):
 
 @admin.register(UseCase)
 class UseCaseAdmin(admin.ModelAdmin):
-    list_display = ("title", "slug")
+    list_display = ("title", "slug", "app_count")
     search_fields = ("title", "slug")
     prepopulated_fields = {"slug": ("title",)}
+    actions = ["merge_into_target"]
+
+    def get_queryset(self, request):
+        from django.db.models import Count
+
+        return super().get_queryset(request).annotate(_app_count=Count("apps"))
+
+    def app_count(self, obj) -> int:
+        return getattr(obj, "_app_count", 0)
+    app_count.admin_order_field = "_app_count"
+    app_count.short_description = "Apps"
+
+    @admin.action(description="Merge selected use-cases into one canonical row")
+    def merge_into_target(self, request, queryset):
+        """Two-step admin action: pick target slug, then collapse the rest.
+
+        Step 1 (first click): the action shows an intermediate page
+        with the selected use-cases as a radio list — editor picks
+        which one is canonical.
+        Step 2 (form POST): ``merge_use_cases`` re-points every
+        AppUseCase from the non-target rows onto the target, then
+        deletes the source rows.
+        """
+        from django.shortcuts import render
+        from django.http import HttpResponseRedirect
+
+        from .services import merge_use_cases
+
+        ids = list(queryset.values_list("pk", flat=True))
+        if len(ids) < 2:
+            self.message_user(
+                request,
+                "Select at least two use-cases to merge.",
+                level=messages.WARNING,
+            )
+            return None
+
+        target_id = request.POST.get("target")
+        if target_id and request.POST.get("post") == "yes":
+            try:
+                target_id = int(target_id)
+            except (TypeError, ValueError):
+                self.message_user(
+                    request, "Invalid target selection.", level=messages.ERROR,
+                )
+                return None
+            if target_id not in ids:
+                self.message_user(
+                    request,
+                    "Target must be one of the selected rows.",
+                    level=messages.ERROR,
+                )
+                return None
+
+            stats = merge_use_cases(target_id, [pk for pk in ids if pk != target_id])
+            target = UseCase.objects.get(pk=target_id)
+            self.message_user(
+                request,
+                (
+                    f"Merged into '{target.title}': "
+                    f"{stats['reassigned']} AppUseCase rows re-pointed, "
+                    f"{stats['deduplicated']} duplicates removed, "
+                    f"{stats['deleted_use_cases']} source use-cases deleted."
+                ),
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(request.get_full_path())
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Merge use-cases",
+            "queryset": queryset,
+            "opts": self.model._meta,
+            "action_checkbox_name": admin.helpers.ACTION_CHECKBOX_NAME,
+        }
+        return render(request, "admin/catalog/usecase/merge_confirm.html", context)
 
 
 # ---------------------------------------------------------------------------

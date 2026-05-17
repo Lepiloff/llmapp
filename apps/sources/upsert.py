@@ -200,7 +200,7 @@ def attach_capabilities(
         defaults = {"value": value}
         cap_evidence = (evidence.get(cap_key) or "").strip()
         if cap_evidence:
-            defaults["note"] = cap_evidence[:200]
+            defaults["note"] = cap_evidence[:500]
         AppCapability.objects.update_or_create(
             app=app,
             capability=cap_obj,

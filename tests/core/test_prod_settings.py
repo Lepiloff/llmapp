@@ -54,3 +54,31 @@ def test_prod_boots_with_real_secret_key(monkeypatch, _restore_prod_module):
     module = _import_prod()
     assert module.SECRET_KEY == "x" * 64
     assert module.DEBUG is False
+
+
+def test_prod_installs_whitenoise_after_security(monkeypatch, _restore_prod_module):
+    """WhiteNoise must sit immediately after SecurityMiddleware so its
+    response headers see the SecurityMiddleware ones.
+    """
+    monkeypatch.setenv("SECRET_KEY", "x" * 64)
+    monkeypatch.setenv("ALLOWED_HOSTS", "example.com")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+
+    module = _import_prod()
+    sec = "django.middleware.security.SecurityMiddleware"
+    wn = "whitenoise.middleware.WhiteNoiseMiddleware"
+    assert sec in module.MIDDLEWARE
+    assert wn in module.MIDDLEWARE
+    assert module.MIDDLEWARE.index(wn) == module.MIDDLEWARE.index(sec) + 1
+
+
+def test_prod_uses_whitenoise_storage_backend(monkeypatch, _restore_prod_module):
+    monkeypatch.setenv("SECRET_KEY", "x" * 64)
+    monkeypatch.setenv("ALLOWED_HOSTS", "example.com")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+
+    module = _import_prod()
+    assert (
+        module.STORAGES["staticfiles"]["BACKEND"]
+        == "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )

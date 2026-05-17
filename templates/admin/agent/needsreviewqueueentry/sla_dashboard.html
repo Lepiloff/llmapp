@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<style>
+  .sla-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.5rem; }
+  .sla-card { padding:1rem; border-radius:8px; background:#f7f7f7; }
+  .sla-card.bad { background:#fee2e2; }
+  .sla-card.good { background:#dcfce7; }
+  .sla-card h3 { margin:0 0 .25rem; font-size:.8rem; color:#555; font-weight:500; text-transform:uppercase; }
+  .sla-card .v { font-size:1.8rem; font-weight:700; line-height:1; }
+  .sla-table { width:100%; border-collapse:collapse; }
+  .sla-table th, .sla-table td { padding:.4rem .6rem; border-bottom:1px solid #eee; text-align:left; }
+  .sla-table tr.overdue { background:#fef3c7; }
+</style>
+
+<p>
+  SLA window: pending entries are considered overdue after
+  <strong>{{ sla_days }} days</strong>.
+  <a href="../">&larr; Back to queue</a>
+</p>
+
+<div class="sla-grid">
+  <div class="sla-card {% if is_healthy %}good{% else %}bad{% endif %}">
+    <h3>Status</h3>
+    <div class="v">{% if is_healthy %}OK{% else %}OVERDUE{% endif %}</div>
+  </div>
+  <div class="sla-card">
+    <h3>Pending</h3>
+    <div class="v">{{ pending_count }}</div>
+  </div>
+  <div class="sla-card {% if overdue_count %}bad{% endif %}">
+    <h3>Overdue (&gt; {{ sla_days }}d)</h3>
+    <div class="v">{{ overdue_count }}</div>
+  </div>
+  <div class="sla-card {% if oldest_age_days > sla_days %}bad{% endif %}">
+    <h3>Oldest age (days)</h3>
+    <div class="v">{{ oldest_age_days }}</div>
+  </div>
+</div>
+
+<h2>By kind</h2>
+<table class="sla-table">
+  <thead><tr><th>Kind</th><th>Count</th></tr></thead>
+  <tbody>
+    {% for kind, count in by_kind %}
+    <tr><td>{{ kind }}</td><td>{{ count }}</td></tr>
+    {% empty %}
+    <tr><td colspan="2"><em>queue is empty</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 style="margin-top:1.5rem">Top 10 oldest pending</h2>
+<table class="sla-table">
+  <thead>
+    <tr><th>#</th><th>App</th><th>Kind</th><th>Created</th><th>Age (days)</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for e in top_oldest %}
+    <tr class="{% if e.overdue %}overdue{% endif %}">
+      <td>{{ e.pk }}</td>
+      <td>{{ e.app__name }} <code>({{ e.app__slug }})</code></td>
+      <td>{{ e.kind }}</td>
+      <td>{{ e.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ e.age_days }}</td>
+      <td><a href="{{ e.url }}">open</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6"><em>nothing pending</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

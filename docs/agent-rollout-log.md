@@ -11,7 +11,7 @@ bootstrap.
 
 ---
 
-## Status snapshot — 2026-05-17
+## Status snapshot — 2026-05-17 (Sprint 2)
 
 * **Phase 0** — MCP Registry ingest stabilized. ✅
 * **Phase 1 + 1b** — LLM enrichment for existing DRAFTs, real OpenAI
@@ -31,9 +31,15 @@ bootstrap.
   P1 findings from the architectural review: SECRET_KEY hardening,
   /health/ Celery worker check, unscheduled beat tasks, sitemap cache
   + invalidation, AppPlatform editor-edit preservation, FTS taxonomy
-  coverage, per-domain rate limiter, retention policy. 263 tests
-  passing (+53). Only F1 (Anthropic provider, policy-deferred) and B3
-  (official directories, ToS-gated) remain in the open-findings list.
+  coverage, per-domain rate limiter (cross-process via Redis),
+  retention policy.
+* **Sprint 2 — P2 follow-on (2026-05-17)** ✅ — closed 7 P2 findings:
+  /go/ rate-limit, WhiteNoise prod static, capability evidence
+  200→500, MCP Registry 404 → Sentry, HEAD→GET link-check fallback,
+  UseCase merge admin tool, SLA dashboard for review queue. 303
+  tests passing (+28). Only F1 (Anthropic provider, policy-deferred)
+  and B3 (official directories, ToS-gated) remain in the
+  open-findings list.
 
 **Catalog state right now:**
 
@@ -724,6 +730,94 @@ Total after follow-up: 275 passing (+12 vs initial Sprint 1).
   conservative design constraints already enforced upstream
   (`DomainRateLimiter` covers the per-domain RPS guarantee; robots
   parser is the only piece still to write — Hard constraint #8b).
+
+---
+
+## Sprint 2 — P2 follow-on (2026-05-17) ✅
+
+Sprint 1 closed the prod-blocker P1 list. Sprint 2 picks up the
+P2 backlog from the same architectural review — quality-of-life
+fixes that aren't release blockers but tighten the operational
+surface. 303 passing tests at end (+28 vs Sprint 1).
+
+**P2.9 — /go/<slug>/ rate-limit.**
+`apps/analytics/views.py::outbound_redirect` now decorated with
+`@ratelimit(key='ip', rate='60/m', block=True)`. Each request
+writes one `ClickEvent`, which feeds the trending score; without a
+cap an attacker could inflate trending rankings or simply flood the
+DB. 60/min is high enough that real users never hit it, low enough
+that scripted abuse trips a 403. Regressions:
+`tests/analytics/test_outbound_rate_limit.py`.
+
+**P2.14 — WhiteNoise for prod static.**
+The docker-compose `nginx` profile is optional (set via
+`--profile production`); without it, gunicorn alone wouldn't serve
+`/static/*` and admin CSS/JS 404'd. WhiteNoise installed as a hard
+dependency (`pyproject.toml`), middleware injected immediately
+after `SecurityMiddleware` in `config/settings/prod.py`, storage
+backend set to `CompressedManifestStaticFilesStorage` (cache-busting
+hashes + gzip/brotli). Regressions:
+`tests/core/test_prod_settings.py` (+2: middleware order, storage
+backend).
+
+**P2.12 — AppCapability.note 200→500 chars.**
+LLM citations from README sentences were routinely cut mid-quote
+at 200. Field widened to 500 via migration
+`apps/catalog/migrations/0002_expand_capability_note_to_500.py`.
+Truncation callsites in `apps/agent/persist.py` and
+`apps/sources/upsert.py` bumped from `[:200]` to `[:500]`.
+Regressions: `tests/catalog/test_capability_evidence_length.py`.
+
+**P2.13 — MCP Registry 404 surfaces in Sentry.**
+The registry endpoint has been returning 404 since ~2026-05-15; the
+ingest task swallowed the exception with `logger.exception(...)`
+and reported counters=0 — invisible in alerting. Added
+`_report_to_sentry(exc, base_url, cursor)` in
+`apps/sources/mcp_registry.py` that captures via `sentry_sdk` with
+a stable `fingerprint=["mcp-registry-unreachable", str(status)]`
+so all 404s coalesce into one Sentry issue across daily retries.
+Soft dependency — no-ops when `sentry_sdk` isn't importable
+(local dev, CI). Regressions:
+`tests/sources/test_mcp_registry_sentry.py` (+3).
+
+**P2.10 — HEAD-only link check → GET fallback.**
+`apps/sources/tasks.py::_check_app_links` issued HEAD-only requests.
+Some SaaS endpoints (and many GitHub Pages sites) return 405 / 501
+on HEAD even when live; those URLs were tipping
+`consecutive_failures` every cycle and tripping auto-deprecate
+after 7 cycles. New `_probe_url(url)` helper: HEAD first, fall back
+to a tiny ranged GET (`Range: bytes=0-1023`, `stream=True`) when
+HEAD returns 403 / 405 / 501. Regressions:
+`tests/sources/test_probe_url.py` (+11).
+
+**P2.11 — UseCase merge admin tool.**
+LLM enrichment produces a long tail of synonym use-cases
+(`"Generate sales reports"` vs `"Sales report generation"` vs
+`"Generate a sales report"` — three slugs for one editorial
+concept). New service function
+`apps/catalog/services.merge_use_cases(target_id, source_ids)`
+collapses sources into a target row inside `transaction.atomic()`
++ `select_for_update()`, with safe deduplication when an app
+already has the target row (unique_together protection). Wired as
+admin action `Merge selected use-cases into one canonical row` on
+`UseCaseAdmin` with a two-step intermediate page so editors pick
+the canonical slug before applying. List shows `app_count`
+annotation so editors can prioritize collapsing the heavy-hitter
+synonyms first. Template:
+`templates/admin/catalog/usecase/merge_confirm.html`.
+Regressions: `tests/catalog/test_merge_use_cases.py` (+5).
+
+**P2.15 — SLA dashboard for the review queue.**
+`/admin/agent/needsreviewqueueentry/sla-dashboard/` — one-page
+snapshot for the editor backlog. Reports: pending count, overdue
+count (>`SLA_PENDING_DAYS=14` days unresolved), oldest age in days,
+breakdown by kind, top-10 oldest pending entries with deep links.
+Status block flips between OK and OVERDUE. Editors and oncall use
+this instead of filtering the changelist by hand. Custom URL
+registered via `NeedsReviewQueueEntryAdmin.get_urls`; reachable URL
+also stashed in `extra_context['sla_dashboard_url']` for any
+future changelist-template integration. Regressions:
+`tests/agent/test_sla_dashboard.py` (+3).
 
 ---
 
