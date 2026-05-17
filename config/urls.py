@@ -9,6 +9,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.contrib.sitemaps.views import sitemap
 from django.urls import include, path
+from django.views.decorators.cache import cache_page
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.conf.urls.static import static
@@ -50,8 +51,15 @@ urlpatterns = [
     path('<slug:public_path>/', catalog_views.platform_page, name='platform_page'),
     path('<slug:public_path>/<slug:category_slug>/', catalog_views.cross_page, name='cross_page'),
 
-    # SEO
-    path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='sitemap'),
+    # SEO — sitemap is cached for 30 minutes; `apps.seo.tasks.rebuild_sitemap`
+    # purges the cache when the catalog changes so new published apps appear
+    # without waiting for the TTL.
+    path(
+        'sitemap.xml',
+        cache_page(60 * 30, key_prefix='sitemap_v1')(sitemap),
+        {'sitemaps': sitemaps},
+        name='sitemap',
+    ),
     path('robots.txt', TemplateView.as_view(
         template_name='seo/robots.txt',
         content_type='text/plain'

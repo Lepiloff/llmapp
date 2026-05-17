@@ -1050,3 +1050,38 @@ def _send_budget_alert(
         recipient_list=recipients,
         fail_silently=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Retention — agent-log cleanup
+# ---------------------------------------------------------------------------
+@shared_task
+def cleanup_old_agent_logs(days_to_keep: int | None = None) -> dict:
+    """Drop ``AgentRun`` rows older than ``days_to_keep``.
+
+    ``EnrichmentTask`` and ``LLMCallLog`` cascade off ``AgentRun`` (FK
+    on_delete=CASCADE), so deleting old runs reclaims the full audit
+    chain in one statement. Resolved ``NeedsReviewQueueEntry`` rows are
+    deleted via the same cutoff — pending entries are preserved
+    regardless of age so editors don't lose work.
+    """
+    from apps.agent.models import AgentRun, NeedsReviewQueueEntry
+
+    days = days_to_keep or int(
+        getattr(settings, "AGENT_LOG_RETENTION_DAYS", 180)
+    )
+    cutoff = timezone.now() - timedelta(days=days)
+
+    deleted_runs, _ = AgentRun.objects.filter(started_at__lt=cutoff).delete()
+    deleted_queue, _ = NeedsReviewQueueEntry.objects.filter(
+        created_at__lt=cutoff,
+        resolved_at__isnull=False,
+    ).delete()
+
+    result = {
+        "days_to_keep": days,
+        "deleted_runs": deleted_runs,
+        "deleted_resolved_queue_entries": deleted_queue,
+    }
+    logger.info("agent_logs_cleanup_completed", extra=result)
+    return result

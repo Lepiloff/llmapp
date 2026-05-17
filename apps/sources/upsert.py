@@ -81,7 +81,26 @@ def find_soft_duplicate(draft: AppDraft) -> App | None:
 # attach_* — write per-relation data once the App exists.
 # ---------------------------------------------------------------------------
 def attach_platforms(app: App, draft: AppDraft) -> None:
-    """Create or update one `AppPlatform` row per platform slug."""
+    """Create or update one ``AppPlatform`` row per platform slug.
+
+    First-time creation fills every field from the draft. On a refresh
+    (the same (app, platform) row already exists) we mirror the
+    ``apps.agent.persist._apply_field_updates`` contract: editor-owned
+    fields are filled only when still empty/UNKNOWN. ``metadata`` is
+    *shallow-merged* — draft keys are added/overwritten, but keys the
+    editor put there by hand survive. This protects against the
+    Phase 3 regression where re-discovering the same external_id
+    silently clobbered ``region_availability`` / ``supported_plans``
+    that an editor had set on a DRAFT card.
+
+    Race-safety: the snapshot-then-update is wrapped in
+    ``transaction.atomic()`` with ``select_for_update()`` on the
+    existing row, so an editor edit committed between our read and our
+    write would either block us until commit (and we'd see the
+    editor's value under the lock, preserving it) or block the editor
+    until we commit (and the editor's transaction would re-read our
+    write before deciding what to overwrite).
+    """
     for slug in draft.platforms:
         try:
             platform = Platform.objects.get(slug=slug)
@@ -91,18 +110,55 @@ def attach_platforms(app: App, draft: AppDraft) -> None:
                 extra={"slug": slug, "app_id": app.pk},
             )
             continue
-        AppPlatform.objects.update_or_create(
-            app=app,
-            platform=platform,
-            defaults={
-                "official_directory_url": draft.official_directory_url,
-                "supported_plans": draft.supported_plans,
-                "region_availability": draft.region_availability or "unknown",
-                "scope_summary": draft.scope_summary,
-                "metadata": draft.platform_metadata or {},
-                "last_verified_on_platform_at": timezone.now(),
-            },
-        )
+
+        with transaction.atomic():
+            existing = (
+                AppPlatform.objects.select_for_update()
+                .filter(app=app, platform=platform)
+                .first()
+            )
+            if existing is None:
+                AppPlatform.objects.create(
+                    app=app,
+                    platform=platform,
+                    official_directory_url=draft.official_directory_url,
+                    supported_plans=list(draft.supported_plans or []),
+                    region_availability=draft.region_availability or "unknown",
+                    scope_summary=draft.scope_summary,
+                    metadata=dict(draft.platform_metadata or {}),
+                    last_verified_on_platform_at=timezone.now(),
+                )
+                continue
+
+            updates: dict = {"last_verified_on_platform_at": timezone.now()}
+
+            # Fill empty fields only — never overwrite editor edits. The
+            # locked row's values are what we compare against, so a
+            # concurrent editor write that committed before our lock is
+            # visible here and survives.
+            if not existing.official_directory_url and draft.official_directory_url:
+                updates["official_directory_url"] = draft.official_directory_url
+            if not existing.supported_plans and draft.supported_plans:
+                updates["supported_plans"] = list(draft.supported_plans)
+            if (
+                existing.region_availability
+                == AppPlatform.RegionAvailability.UNKNOWN
+                and draft.region_availability
+                and draft.region_availability
+                != AppPlatform.RegionAvailability.UNKNOWN
+            ):
+                updates["region_availability"] = draft.region_availability
+            if not existing.scope_summary and draft.scope_summary:
+                updates["scope_summary"] = draft.scope_summary
+
+            # Shallow-merge metadata: draft fills missing keys, editor wins
+            # on conflicts.
+            merged_metadata = dict(draft.platform_metadata or {})
+            merged_metadata.update(existing.metadata or {})
+            if merged_metadata != (existing.metadata or {}):
+                updates["metadata"] = merged_metadata
+
+            AppPlatform.objects.filter(pk=existing.pk).update(**updates)
 
 
 def attach_listing_types(app: App, slugs: list[str]) -> None:

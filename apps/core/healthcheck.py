@@ -13,6 +13,10 @@ from django_redis import get_redis_connection
 
 logger = logging.getLogger(__name__)
 
+# Celery worker probe budget. Short enough to keep /health/ snappy under a
+# load balancer; long enough for a healthy worker to respond.
+_CELERY_PING_TIMEOUT_SECONDS = 1.5
+
 
 def _check_db() -> bool:
     try:
@@ -49,12 +53,32 @@ def _check_pg_trgm() -> bool:
         return False
 
 
+def _check_celery_worker() -> bool:
+    """Return True when at least one Celery worker replies to a ping.
+
+    A healthy ``web`` container in front of a dead ``worker`` would happily
+    accept traffic — beat-scheduled discovery, re-actualization and budget
+    checks would all silently stop. We probe via the standard control
+    channel with a short timeout so /health/ stays snappy under the load
+    balancer.
+    """
+    try:
+        from config.celery import app as celery_app
+
+        replies = celery_app.control.ping(timeout=_CELERY_PING_TIMEOUT_SECONDS)
+    except Exception:  # pragma: no cover - infra failure (broker down / import)
+        logger.exception("healthcheck_celery_failed")
+        return False
+    return bool(replies)
+
+
 def view(request: HttpRequest) -> JsonResponse:
     """Return 200 when every dependency is healthy, 503 otherwise."""
     checks = {
         "db": _check_db(),
         "redis": _check_redis(),
         "pg_trgm": _check_pg_trgm(),
+        "celery_worker": _check_celery_worker(),
     }
     status = 200 if all(checks.values()) else 503
     return JsonResponse(

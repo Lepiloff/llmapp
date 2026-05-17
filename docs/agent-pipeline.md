@@ -35,9 +35,10 @@ apps/agent/
 │   └── schemas.py          # Pydantic для structured output
 ├── pipeline/               # pure Python; принимает TaxonomySnapshot, не импортирует Django
 │   ├── taxonomy.py         # TaxonomySnapshot dataclass — единственный способ передать БД-таксономию в pipeline
-│   ├── fetch.py            # httpx async, robots, ETag, rate-limit per domain
+│   ├── fetch.py            # httpx async, robots, ETag; вызывает rate_limit.get_default_limiter()
+│   ├── rate_limit.py       # NoopRateLimiter + InMemoryDomainRateLimiter + set/get_default_limiter() registration point
 │   ├── enrich.py           # url+rawdata + TaxonomySnapshot → EnrichedDraft via LLM
-│   ├── merge.py            # NEW: merge policy для enrich_existing_draft (см. Phase 1)
+│   ├── merge.py            # merge policy для enrich_existing_draft (см. Phase 1)
 │   ├── validate.py         # URL liveness, dedup helpers, guardrails
 │   └── reactualize.py      # diff existing App vs fresh fetch
 ├── sources/                # discovery sources (новые BaseSource impls)
@@ -48,10 +49,12 @@ apps/agent/
 │   └── gemini_apps.py
 ├── persist.py              # ЕДИНСТВЕННАЯ точка контакта с apps.catalog
 │                           # Содержит build_taxonomy_snapshot(), persist_new_draft(), apply_merge_set()
+├── rate_limit_redis.py     # Django layer: RedisDomainRateLimiter + build_limiter_from_settings();
+│                           # импортирует django_redis, поэтому ВНЕ pipeline/
 ├── models.py               # Django: AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 ├── tasks.py                # тонкие Celery wrappers — готовят TaxonomySnapshot, вызывают pipeline, пишут результат
 ├── admin.py                # observability + review queue UI
-├── apps.py
+├── apps.py                 # AgentConfig.ready() регистрирует limiter в pipeline.rate_limit
 └── management/commands/
     ├── agent_run.py        # ручной one-off запуск
     └── agent_reactualize.py
@@ -81,9 +84,18 @@ apps/agent/
    - Для всех `App`, у которых есть `Source.source_type=MCP_REGISTRY` и нет `AppPlatform` записи с `platform__slug='mcp'` → создать `AppPlatform` через `attach_platforms()` (использовать `payload` из `Source` для protocol_version/transport/repository_url).
    - Для тех же `App`: если `platform_verification_status == NOT_LISTED` → переключить на `OFFICIAL` (MCP Registry — это и есть официальный directory согласно business.md § 6.5).
 4. **Pre-check для остальных claim-ов из feedback** (read-only, документировать факты):
-   - Проверить `apps/search/` (`refresh_search_vector`) — реально ли работает signal-based refresh, или нужен багфикс.
-   - Проверить URL-routes (`config/urls.py` + `apps/*/urls.py`) — все ли используемые endpoints зарегистрированы.
-   - Проверить наличие миграции с `TrigramExtension` и `GinIndex` (`pg_trgm`) — если её нет, добавить.
+   - `apps/search/` (`refresh_search_vector`): signal-based refresh работает корректно
+     (`apps/catalog/signals.py` + `apps/search/tasks.py`). **Sprint 1 (п.2)** дополнительно
+     исправил, что vector индексировал только 4 базовых колонки (`name`, `short_description`,
+     `developer_name`, `long_description`) — теперь включает агрегированный `search_index_text`
+     с platform/category/use-case names, чтобы FTS-запросы вида "mcp servers" находили
+     карточки по таксономии, а не только по trigram-fallback'у. Регрессия:
+     `tests/search/test_fts_taxonomy_match.py`.
+   - URL-routes (`config/urls.py` + `apps/*/urls.py`): verified — sitemap, health,
+     catalog/search/admin/submit/blog/newsletter/go/<platform>/<category> зарегистрированы.
+   - `TrigramExtension` + `pg_trgm` GIN-индексы: verified — миграции `apps/catalog/migrations`
+     создают `pg_trgm` extension и GIN-индексы на `name` / `developer_name`
+     (`app_name_trgm_gin`, `app_dev_trgm_gin`). `/health/` пробит `similarity('a'::text, 'a'::text)`.
 
    Если что-то из этого реально сломано — фикс расширяет Phase 0; если работает — фиксируем "verified" в комментарии и идём дальше.
 
@@ -123,7 +135,7 @@ apps/agent/
 - `AGENT_LLM_MODEL_CHEAP=` — то же для дешёвой модели.
 - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` — каждый optional; обязателен только тот, чей провайдер выбран. Конфиг-валидация при старте кричит, если выбранный провайдер не имеет ключа.
 - `AGENT_MONTHLY_BUDGET_USD=` — без default; обязателен.
-- `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0`
+- `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0` — enforced через `DomainRateLimiter` (Sprint 1). Применяется ко всем outbound fetcher'ам (RSS, GitHub Search/Contents, `fetch_url_text`).
 - `AGENT_SOURCES_ENABLED=` — feature flag (csv), на старте пусто (всё выключено).
 
 **Pure-Python core:**
@@ -314,8 +326,17 @@ Phase 4 re-actualization строится поверх существующег�
 **Безопасность:**
 - API keys только из env. Никогда в коде / БД / логах.
 - LLM-вывод никогда не интерпретируется как код/SQL/URL без явной валидации.
-- robots.txt обязателен; User-Agent identifying (`LLMAppMarket-Agent/1.0; +https://llmappmarket.com/bots`).
-- Rate limit per domain hard-enforced.
+- robots.txt — обязателен для будущих официальных директорий (B3); RSS / GitHub-API пути его не используют.
+- User-Agent identifying (`LLMAppMarket-Agent/1.0; +https://llmappmarket.com/bots`).
+- Rate limit per domain hard-enforced cross-process — `RedisDomainRateLimiter` (Sprint 1, май 2026); Lua-script atomicity coordinates все Celery worker child-processes. In-memory limiter (`apps/agent/pipeline/rate_limit.py::InMemoryDomainRateLimiter`) — fallback на старте если Redis недоступен.
+
+**Retention** (Sprint 1, май 2026 — закрывает риск unbounded-роста audit-таблиц):
+- `apps.agent.tasks.cleanup_old_agent_logs` (180 дней) — `AgentRun` + каскадно `EnrichmentTask` (FK CASCADE) + `LLMCallLog` (FK CASCADE). Pending `NeedsReviewQueueEntry` **всегда** сохраняются (даже если старше cutoff'а) — editor work не теряется.
+- `apps.sources.tasks.cleanup_old_link_check_results` (30 дней) — `LinkCheckResult` audit. `LinkHealth` это rolling-summary, не трогается.
+- `apps.search.tasks.cleanup_old_search_logs` (90 дней) — `SearchLog`. `PopularSearch` пересобирается из последних 30 дней `SearchLog` через `update_popular_searches`, так что 90-дневное окно безопасно.
+- `apps.analytics.tasks.cleanup_old_analytics_data` (90 дней) — `ClickEvent`, `PageView`.
+
+Параметры env: `AGENT_LOG_RETENTION_DAYS`, `SOURCES_LINK_CHECK_RETENTION_DAYS`, `SEARCH_LOG_RETENTION_DAYS`. Все задачи в beat (sunday 04:00-04:45 UTC, после link-checker и до newsletter).
 
 ---
 
@@ -360,26 +381,40 @@ Phase 4 re-actualization строится поверх существующег�
 
 **Изменения в Phase 1+:**
 - `apps/sources/models.py` — добавить `Source.last_enriched_at` в Phase 4 (миграция).
-- `config/settings/base.py:214-235` — расширить `CELERY_BEAT_SCHEDULE` на agent-задачи (по фазам).
-- `config/settings/base.py` — env vars для LLM, budget, rate limits.
+- `config/settings/base.py:214-235` — расширить `CELERY_BEAT_SCHEDULE` на agent-задачи (по фазам). После Sprint 1 в расписании также operational-задачи (sitemap, retention, trending recalc, quality recalc, SEO reports, popular searches) — не только agent.
+- `config/settings/base.py` — env vars для LLM, budget, rate limits. Sprint 1 добавил retention env'ы: `AGENT_LOG_RETENTION_DAYS=180`, `SOURCES_LINK_CHECK_RETENTION_DAYS=30`, `SEARCH_LOG_RETENTION_DAYS=90`.
 - `pyproject.toml:6-33` — новые зависимости (Phase 1).
 - `.env.example`, `.env` — новые ключи (без значений).
 
+**Изменения в Sprint 1 (май 2026, prod-readiness):**
+- `apps/sources/upsert.py::attach_platforms` — переписана под «editor wins on merge» контракт; `AppPlatform.metadata` shallow-merge'ится, остальные поля заполняются только если пустые/UNKNOWN. Закрывает Hard constraint #2 на повторных discovery-циклах. Регрессии: `tests/sources/test_attach_platforms.py`.
+- `apps/search/tasks.py::refresh_app_search_vector` — индексирует platform/category/use-case names через агрегированный `search_index_text`. Регрессии: `tests/search/test_fts_taxonomy_match.py`.
+- `apps/seo/tasks.py::rebuild_sitemap` — теперь реально инвалидирует кеш через `delete_pattern` + fallback `cache.clear()`. Sitemap view обёрнут в `cache_page(30min, key_prefix='sitemap_v1')`. Регрессии: `tests/seo/test_sitemap_cache.py`.
+- `apps/core/healthcheck.py::_check_celery_worker` — `/health/` 503 если worker не отвечает на ping (timeout 1.5s).
+- `config/settings/prod.py` — `SECRET_KEY` hard-fail без env-значения; запрещён insecure dev-default.
+
 **Новые** (создаются в `apps/agent/`):
 - См. структуру в разделе "Архитектурное решение".
+
+**Новые модули Sprint 1:**
+- `apps/agent/pipeline/rate_limit.py` — `NoopRateLimiter`, `InMemoryDomainRateLimiter`, registration-point `get/set_default_limiter()`. Pure Python — нет импортов Django. Регрессии: `tests/agent/test_rate_limit.py`.
+- `apps/agent/rate_limit_redis.py` — `RedisDomainRateLimiter` (Lua-script cross-process throttle) + `build_limiter_from_settings()` factory. Django layer, импортирует `django_redis`. Регрессии: `tests/agent/test_rate_limit_redis.py`.
+- `apps/seo/signals.py` — `post_save(App)` и `post_delete(App)` → `transaction.on_commit(invalidate_sitemap_cache)`. Любая модификация (включая unpublish и delete) сбрасывает кэш sitemap.
+- `apps/catalog/tasks.py` — `recalc_quality_scores_batch` (daily beat).
 
 ---
 
 ## Hard constraints
 
 1. **LLM никогда не публикует**: `App.status=DRAFT` всегда, `editorial_review_status=UNREVIEWED` всегда. Тест в `tests/agent/test_persist.py`.
-2. **LLM никогда не перезаписывает редакторские правки**: для существующих App — заполняем только пустые/UNKNOWN поля; для launch_status/pricing/verdict — только предложение в queue, никогда apply.
+2. **LLM никогда не перезаписывает редакторские правки**: для существующих `App` **и `AppPlatform`** — заполняем только пустые/UNKNOWN поля; `AppPlatform.metadata` shallow-merge'ится с editor-edits побеждающими на конфликтах; для launch_status/pricing/verdict — только предложение в queue, никогда apply. Enforce: `apps/agent/persist.py::apply_merge_set` + `apps/sources/upsert.py::attach_platforms` (последнее с Sprint 1). Регрессии: `tests/agent/test_persist.py`, `tests/sources/test_attach_platforms.py`.
 3. **Verdict — поле редактора**: LLM пишет в `Source.payload['proposed_verdict']`, никогда в `App.verdict`.
 4. **Capability UNKNOWN-by-default**: `yes/no` только при непустом `evidence`. Guardrail enforced в `pipeline/validate.py`.
 5. **Дедупликация перед записью**: всегда через `find_soft_duplicate`. Soft-matches создают второй `Source`, а не новый `App`.
 6. **Re-actualization не делает silent auto-update App-полей**: все diffs → review queue.
 7. **Audit trail**: каждый LLM-вызов в `LLMCallLog`, источник enrichment в `Source.payload`.
-8. **Robots.txt + rate limiting**: fetcher проверяет robots, не более 1 RPS/домен.
+8a. **Rate limiting (per-domain) hard-enforced cross-process** через Redis-backed `RedisDomainRateLimiter` (`apps/agent/rate_limit_redis.py`, Sprint 1 follow-up). Atomic Lua-script держит "next allowed timestamp" на host в Redis, так что `worker --concurrency=2` (или несколько worker-контейнеров) соблюдают единый `AGENT_RATE_LIMIT_RPS_PER_DOMAIN` end-to-end. Pure-Python pipeline-слой (`apps/agent/pipeline/rate_limit.py`) экспонирует `get_default_limiter()` + `set_default_limiter()`; Django bridge (`AgentConfig.ready`) регистрирует Redis-implementation при старте, с soft-fallback на in-memory limiter если Redis недоступен (логируется warning). Подключён к `fetch_url_text`, GitHub Search/Contents API, RSS-fetcher. Дефолт `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0`. Регрессии: `tests/agent/test_rate_limit.py`, `tests/agent/test_rate_limit_redis.py`.
+8b. **Robots.txt enforcement — TBD**: понадобится при работе над B3 (official directories — ChatGPT/Claude/Gemini). Текущие источники (RSS, GitHub API) на robots.txt не опираются (используют публичные API), поэтому проверка ещё не реализована.
 9. **Budget cap**: hard stop при превышении месячного бюджета.
 10. **TaxonomySnapshot — единственный мост таксономии в pipeline**: pipeline-код не импортирует Django.
 

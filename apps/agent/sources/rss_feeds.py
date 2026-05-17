@@ -15,6 +15,8 @@ from collections.abc import Callable, Iterable
 
 import requests
 
+from apps.agent.pipeline.rate_limit import get_default_limiter
+
 from .base import DiscoveryCandidate
 
 
@@ -55,6 +57,7 @@ class RSSFeedSource:
                     return
 
     def _requests_fetch(self, url: str) -> str:
+        get_default_limiter().acquire(url)
         resp = requests.get(
             url,
             timeout=self.timeout,

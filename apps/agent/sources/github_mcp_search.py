@@ -10,6 +10,7 @@ import requests
 from django.utils.text import slugify
 
 from apps.agent.pipeline.fetch import FetchResult
+from apps.agent.pipeline.rate_limit import get_default_limiter
 from apps.sources.base import AppDraft
 
 from .base import DiscoveryCandidate
@@ -55,6 +56,7 @@ class GitHubMCPSearchSource:
         return headers
 
     def _requests_get_json(self, url: str, params: dict, headers: dict) -> dict:
+        get_default_limiter().acquire(url)
         resp = requests.get(
             url,
             params=params,
@@ -171,6 +173,7 @@ def fetch_github_readme_text(
 
 def _requests_get_json_with_token(*, token: str) -> GitHubGet:
     def _get(url: str, params: dict, headers: dict) -> dict:
+        get_default_limiter().acquire(url)
         resp = requests.get(url, params=params, headers=headers, timeout=15.0)
         resp.raise_for_status()
         return resp.json()

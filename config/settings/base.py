@@ -216,6 +216,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 CELERY_BEAT_SCHEDULE = {
+    # ---- Ingest ----
     "ingest_mcp_registry": {
         "task": "apps.sources.tasks.ingest_mcp_registry",
         "schedule": crontab(hour=4, minute=0),
@@ -224,18 +225,47 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.sources.tasks.check_app_links_batch",
         "schedule": crontab(hour=5, minute=0),
     },
-    "rebuild_sitemap": {
-        "task": "apps.seo.tasks.rebuild_sitemap",
-        "schedule": crontab(minute="*/30"),
-    },
+    # ---- Search / sitemap ----
     "refresh_search_vectors_batch": {
         "task": "apps.search.tasks.refresh_search_vectors_batch",
         "schedule": crontab(hour=3, minute=0),
     },
+    "update_popular_searches": {
+        "task": "apps.search.tasks.update_popular_searches",
+        "schedule": crontab(hour=3, minute=30),
+    },
+    "rebuild_sitemap": {
+        "task": "apps.seo.tasks.rebuild_sitemap",
+        "schedule": crontab(minute="*/30"),
+    },
+    "ping_search_engines": {
+        "task": "apps.seo.tasks.ping_search_engines",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "generate_seo_reports": {
+        "task": "apps.seo.tasks.generate_seo_reports",
+        "schedule": crontab(day_of_week="mon", hour=8, minute=15),
+    },
+    # ---- Analytics ----
+    "calculate_trending_scores": {
+        "task": "apps.analytics.tasks.calculate_trending_scores",
+        "schedule": crontab(hour=2, minute=30),
+    },
+    "cleanup_old_analytics_data": {
+        "task": "apps.analytics.tasks.cleanup_old_analytics_data",
+        "schedule": crontab(day_of_week="sun", hour=4, minute=30),
+    },
+    # ---- Catalog ----
+    "recalc_quality_scores_batch": {
+        "task": "apps.catalog.tasks.recalc_quality_scores_batch",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    # ---- Newsletter ----
     "newsletter_draft": {
         "task": "apps.newsletter.tasks.create_weekly_draft",
         "schedule": crontab(day_of_week="fri", hour=6, minute=0),
     },
+    # ---- Agent ----
     "agent_review_queue_digest": {
         "task": "apps.agent.tasks.send_review_queue_digest",
         "schedule": crontab(hour=7, minute=30),
@@ -255,6 +285,19 @@ CELERY_BEAT_SCHEDULE = {
     "agent_budget_check": {
         "task": "apps.agent.tasks.agent_budget_check",
         "schedule": crontab(minute=15),  # hourly at :15
+    },
+    # ---- Retention ----
+    "cleanup_old_agent_logs": {
+        "task": "apps.agent.tasks.cleanup_old_agent_logs",
+        "schedule": crontab(day_of_week="sun", hour=4, minute=0),
+    },
+    "cleanup_old_link_check_results": {
+        "task": "apps.sources.tasks.cleanup_old_link_check_results",
+        "schedule": crontab(day_of_week="sun", hour=4, minute=15),
+    },
+    "cleanup_old_search_logs": {
+        "task": "apps.search.tasks.cleanup_old_search_logs",
+        "schedule": crontab(day_of_week="sun", hour=4, minute=45),
     },
 }
 
@@ -406,6 +449,19 @@ AGENT_REACTUALIZATION_INTERVAL_DAYS = config(
 )
 AGENT_REACTUALIZATION_BATCH_SIZE = config(
     "AGENT_REACTUALIZATION_BATCH_SIZE", default=20, cast=int
+)
+
+# Retention windows for unbounded audit-trail tables. Each cleanup task is
+# scheduled in CELERY_BEAT_SCHEDULE; tweaking the env var changes the
+# cutoff without a code redeploy.
+AGENT_LOG_RETENTION_DAYS = config(
+    "AGENT_LOG_RETENTION_DAYS", default=180, cast=int
+)
+SOURCES_LINK_CHECK_RETENTION_DAYS = config(
+    "SOURCES_LINK_CHECK_RETENTION_DAYS", default=30, cast=int
+)
+SEARCH_LOG_RETENTION_DAYS = config(
+    "SEARCH_LOG_RETENTION_DAYS", default=90, cast=int
 )
 
 # ---------------------------------------------------------------------------

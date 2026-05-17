@@ -11,7 +11,7 @@ bootstrap.
 
 ---
 
-## Status snapshot — 2026-05-15
+## Status snapshot — 2026-05-17
 
 * **Phase 0** — MCP Registry ingest stabilized. ✅
 * **Phase 1 + 1b** — LLM enrichment for existing DRAFTs, real OpenAI
@@ -26,9 +26,14 @@ bootstrap.
   directories (ChatGPT App Directory / Claude Connectors / Gemini
   Apps) still ToS-blocked.
 * **Phase 5** — Budget hard-stop ✅, admin cost dashboard ✅, eval
-  pack scaffolding + 3 baseline fixtures ✅. Only F1 (Anthropic
-  provider, policy-deferred) and B3 (official directories, ToS-gated)
-  remain in the open-findings list.
+  pack scaffolding + 3 baseline fixtures ✅.
+* **Sprint 1 — Prod-readiness hardening (2026-05-17)** ✅ — closed 8
+  P1 findings from the architectural review: SECRET_KEY hardening,
+  /health/ Celery worker check, unscheduled beat tasks, sitemap cache
+  + invalidation, AppPlatform editor-edit preservation, FTS taxonomy
+  coverage, per-domain rate limiter, retention policy. 263 tests
+  passing (+53). Only F1 (Anthropic provider, policy-deferred) and B3
+  (official directories, ToS-gated) remain in the open-findings list.
 
 **Catalog state right now:**
 
@@ -532,6 +537,196 @@ Two prod-blockers landed in commit `5233f2f`:
 
 ---
 
+## Sprint 1 — Prod-readiness hardening (2026-05-17) ✅
+
+Architectural review (`docs/project-overview-ru.md` + this log)
+surfaced 8 P1 findings — risks that didn't block earlier phases but
+needed closing before the prod release. All landed in a single
+sprint with regression tests; total suite went from ~210 to 263
+passing (+53 new, no regressions).
+
+The eight findings, by review-numbering:
+
+**P1.1 — Unscheduled beat tasks.** `calculate_trending_scores`,
+`ping_search_engines`, `cleanup_old_analytics_data`,
+`update_popular_searches`, `generate_seo_reports` were defined but
+never wired into `CELERY_BEAT_SCHEDULE`. Consequences: trending
+homepage block ran on live `qs.trending()` only (cost grows with
+traffic); Google/Bing never pinged after sitemap rebuild;
+ClickEvent/PageView/SearchLog/LinkCheckResult/LLMCallLog grew
+without retention. Fix: 9 new beat entries (5 backfilled + 4 new
+retention tasks). Verified by `tests/core/test_beat_schedule.py`
+which asserts every scheduled task is importable.
+
+**P1.2 — `search_vector` didn't index taxonomy.**
+`refresh_app_search_vector` built the FTS vector from `name` /
+`short_description` / `developer_name` / `long_description` only;
+platforms / categories / use_cases were aggregated into
+`search_index_text` but that field wasn't referenced by the
+`SearchVector` expression that `apps/search/views.py::app_search`
+queries. Queries like "mcp servers" or "developer tools" missed
+cards titled differently. Fix: `search_index_text` now aggregates
+platform/category/use-case names and the vector includes it via
+`Coalesce("search_index_text", Value(""), output_field=TextField())`
+with weight C — name-match (A) still outranks taxonomy match.
+Regressions: `tests/search/test_fts_taxonomy_match.py`.
+
+**P1.3 — `rebuild_sitemap` didn't rebuild.**
+`apps/seo/tasks.py::rebuild_sitemap` ran `Client().get('/sitemap.xml')`
+every 30 min — Django sitemap view regenerates on every request, no
+cache layer existed, so the task wasted DB roundtrips without
+benefit. Fix: sitemap view wrapped in
+`cache_page(60*30, key_prefix='sitemap_v1')`; `rebuild_sitemap`
+purges via `cache.delete_pattern("*sitemap_v1*")` with a `cache.clear()`
+fallback for backends without pattern support;
+`apps/seo/signals.py::post_save(App)` triggers
+`transaction.on_commit(invalidate_sitemap_cache)` so freshly
+published cards appear within seconds, not the 30-min TTL.
+Regressions: `tests/seo/test_sitemap_cache.py` (4).
+
+**P1.4 — `AppPlatform` metadata clobbered on re-discovery.**
+`apps/sources/upsert.py::attach_platforms` used
+`update_or_create(defaults={region_availability, supported_plans,
+scope_summary, metadata, ...})` — every re-discovery of the same
+`external_id` silently overwrote editor-set fields, breaking Hard
+constraint #2 ("LLM never overwrites editor edits") on DRAFT cards.
+Fix: split into create-path (first time fills everything from draft)
+and update-path (only fills empty/UNKNOWN fields; `metadata` is
+shallow-merged with editor edits winning on conflicts;
+`last_verified_on_platform_at` always updates). Constraint extended
+to AppPlatform in `docs/agent-pipeline.md` #2. Regressions:
+`tests/sources/test_attach_platforms.py` (7).
+
+**P1.5 — `SECRET_KEY` insecure default in prod.**
+`config/settings/base.py:23` defaulted to
+`"insecure-dev-key-change-me"`; `prod.py` didn't override. A missing
+`.env` SECRET_KEY would boot prod with a known-key — session
+forgery + signed-data tampering. Fix: `config/settings/prod.py` now
+calls `config("SECRET_KEY")` without default and raises
+`ImproperlyConfigured` on empty/insecure values. Regressions:
+`tests/core/test_prod_settings.py` (3).
+
+**P1.6 — `AGENT_RATE_LIMIT_RPS_PER_DOMAIN` was a dead setting.**
+Defined in `base.py:385`, read nowhere. RSS, GitHub Search,
+`fetch_url_text` hit upstream without per-domain throttling — at
+`discover_github_mcp --limit=30` that's 30 README requests in a
+burst, only saved by GitHub's authoritative rate-limit headers.
+
+Initial fix: `apps/agent/pipeline/rate_limit.py::DomainRateLimiter`
+(thread-safe token-bucket keyed by URL hostname); wired into
+`fetch_url_text`, `GitHubMCPSearchSource._requests_get_json`,
+`_requests_get_json_with_token`, `RSSFeedSource._requests_fetch`.
+
+**Follow-up fix (cross-process correctness):** the initial limiter
+was process-local, but `worker --concurrency=2` runs two child
+processes each carrying its own bucket — actual rate doubled,
+violating the documented guarantee. Replaced with a Redis-backed
+implementation:
+* `apps.agent.rate_limit_redis.RedisDomainRateLimiter` — a tiny Lua
+  script reads the persisted "next allowed timestamp" for a host,
+  computes the wait time, advances the timestamp atomically, returns
+  the wait so the caller sleeps locally. All worker processes
+  coordinate on the same Redis key (`agent:rate_limit:<host>`).
+* Pipeline layer kept pure-Python: `apps/agent/pipeline/rate_limit.py`
+  now exposes `NoopRateLimiter` (default), `InMemoryDomainRateLimiter`,
+  and `get/set_default_limiter()` injection point. No Django imports.
+* `AgentConfig.ready()` calls `build_limiter_from_settings()` which
+  pings Redis and registers either the Redis-backed limiter or
+  (soft-fallback with logged warning) the in-memory one if Redis is
+  unreachable at startup.
+
+Regressions: `tests/agent/test_rate_limit.py` (10),
+`tests/agent/test_rate_limit_redis.py` (10).
+
+**P1.7 — Retention policy absent for unbounded tables.**
+`LLMCallLog`, `EnrichmentTask`, `AgentRun`, `ClickEvent`, `PageView`,
+`SearchLog`, `LinkCheckResult` grew without eviction. At current
+scale (24 apps) this didn't bite yet; at 1k+ apps `LinkCheckResult`
+alone generates ~4k rows/day. Fix: 4 cleanup tasks +
+3 retention envs:
+* `cleanup_old_agent_logs(180d)` — deletes `AgentRun` rows;
+  `EnrichmentTask` and `LLMCallLog` cascade via FK. Pending
+  `NeedsReviewQueueEntry` rows are preserved regardless of age.
+* `cleanup_old_link_check_results(30d)` — `LinkCheckResult` only;
+  `LinkHealth` is rolling-summary, never deleted.
+* `cleanup_old_search_logs(90d)` — `SearchLog`; `PopularSearch` is
+  rebuilt from the trailing 30-day window so 90 days is safe.
+* `cleanup_old_analytics_data(90d)` — was already implemented in
+  `apps/analytics/tasks.py` but never scheduled; wired into beat.
+All four run sunday 04:00-04:45 UTC. Envs:
+`AGENT_LOG_RETENTION_DAYS=180`,
+`SOURCES_LINK_CHECK_RETENTION_DAYS=30`,
+`SEARCH_LOG_RETENTION_DAYS=90`. Regressions:
+`tests/agent/test_cleanup_old_agent_logs.py` (2).
+
+**P1.8 — `/health/` blind to dead Celery worker.**
+Probed DB + Redis + pg_trgm. A live `web` container in front of a
+crashed worker still returned 200 — discovery / re-actualization /
+budget-check silently stopped. Fix:
+`apps/core/healthcheck.py::_check_celery_worker` calls
+`celery_app.control.ping(timeout=1.5)` and returns False on empty
+reply or broker error. Latency stays bounded so /health/ remains
+snappy under a load balancer. Regressions: 4 added to
+`tests/core/test_healthcheck.py` covering ok-ping, no-reply,
+broker-down, and the integration 503-on-celery-down path.
+
+**Sprint 1 follow-up (post-review fixes, same day):**
+A second-pass review surfaced five tightening items that landed on
+top of the initial Sprint 1 commits:
+1. **Cross-process rate limiting** — addressed in P1.6 above.
+2. **Pure-Python pipeline boundary restored.**
+   `apps.agent.pipeline.rate_limit` no longer imports
+   `django.conf.settings`; the Django bridge registers a configured
+   limiter at app startup. Pipeline import-time is Django-free again
+   (`grep -nE "from django|import django" apps/agent/pipeline/` shows
+   only one pre-existing local import inside `reactualize.py`).
+3. **`attach_platforms` race tightened.**
+   Snapshot-then-update now runs inside `transaction.atomic()` with
+   `select_for_update()` on the existing `AppPlatform` row, mirroring
+   `apps.agent.persist._apply_field_updates`. An editor write
+   between the agent's read and write either blocks the agent (and
+   the agent sees the fresh editor value under the lock, preserving
+   it) or blocks the editor (and the editor's transaction re-reads
+   our write before deciding what to overwrite). Regression:
+   `tests/sources/test_attach_platforms.py::test_concurrent_editor_edit_survives_attach_platforms`
+   (threading-based, ~0.3s).
+4. **Sitemap signal covers unpublish + delete.**
+   The first version only invalidated when the saved instance's new
+   status was `PUBLISHED`. Now `post_save` fires unconditionally and
+   a new `post_delete` receiver handles hard-deletion. Stale URLs
+   can no longer linger in the cached XML for up to 30 minutes after
+   a card is hidden or removed. Regressions added for both paths.
+5. **`ping_search_engines` timeout.**
+   Both `urllib.request.urlopen` calls now use an explicit
+   `timeout=10`; a slow Google/Bing endpoint would previously pin a
+   Celery worker indefinitely. Unused `urlencode` import removed.
+
+Total after follow-up: 275 passing (+12 vs initial Sprint 1).
+
+**Doc updates accompanying Sprint 1:**
+* `docs/agent-pipeline.md`: Hard constraint #2 extended to
+  `AppPlatform`; #8 split into 8a (rate-limit hard-enforced
+  cross-process via Redis) and 8b (robots.txt — TBD for B3). Phase
+  0 pre-check now records the FTS taxonomy fix. New "Retention"
+  subsection under Phase 5. Critical-files section lists the new
+  Sprint 1 modules. ASCII tree of `apps/agent/` updated to show
+  `rate_limit_redis.py` in the Django layer (outside `pipeline/`).
+
+**What's still open:**
+* **F1 — Anthropic provider.** Stub raises `NotImplementedError`.
+  Deferred per operator policy until after prod release; planned as
+  the first post-release item (Claude Sonnet 4.6/4.7 on primary
+  role, OpenAI gpt-5.4-mini moves to cheap role or stays as
+  comparison).
+* **B3 — Official directories.** Still legal/ToS-blocked. When
+  cleared, `apps/agent/sources/chatgpt_directory.py` /
+  `claude_connectors.py` / `gemini_apps.py` will follow the
+  conservative design constraints already enforced upstream
+  (`DomainRateLimiter` covers the per-domain RPS guarantee; robots
+  parser is the only piece still to write — Hard constraint #8b).
+
+---
+
 ## Next plan (priority order)
 
 ### A. Quick ROI / close open findings
@@ -561,8 +756,11 @@ Two prod-blockers landed in commit `5233f2f`:
 3. **Official directories — BLOCKED on legal/ToS review.** ChatGPT
    App Directory / Claude Connectors / Gemini Apps. Cannot implement
    conservative scrapers without explicit ToS clearance per operator
-   policy. When unblocked, design constraints: 1 RPS/domain,
-   robots.txt, identifying User-Agent, failure mode = Sentry + retry
+   policy. When unblocked, design constraints: 1 RPS/domain
+   (already enforced by `DomainRateLimiter` — Sprint 1, just plug
+   each new source's fetcher through `get_default_limiter()`),
+   robots.txt parser (still to write — Hard constraint #8b),
+   identifying User-Agent, failure mode = Sentry + retry
    next run, beat 3×/week. **Action: route to legal/business owner
    for ToS clearance before any code is written.**
 

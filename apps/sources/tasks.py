@@ -13,6 +13,7 @@ from datetime import timedelta
 
 import requests
 from celery import shared_task
+from django.conf import settings
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -25,6 +26,26 @@ from .upsert import upsert_app_from_draft
 logger = logging.getLogger(__name__)
 
 AUTO_DEPRECATE_FAILURE_THRESHOLD = 7
+
+
+@shared_task
+def cleanup_old_link_check_results(days_to_keep: int | None = None) -> dict:
+    """Trim the ``LinkCheckResult`` audit trail.
+
+    ``LinkHealth`` is a rolling summary and is never deleted; only the
+    per-probe history rows are trimmed. Default 30 days keeps roughly
+    a month of forensics on `/admin/sources/linkcheckresult/`.
+    """
+    days = days_to_keep or int(
+        getattr(settings, "SOURCES_LINK_CHECK_RETENTION_DAYS", 30)
+    )
+    cutoff = timezone.now() - timedelta(days=days)
+    deleted, _ = LinkCheckResult.objects.filter(checked_at__lt=cutoff).delete()
+    logger.info(
+        "link_check_results_cleanup_completed",
+        extra={"days_to_keep": days, "deleted": deleted},
+    )
+    return {"days_to_keep": days, "deleted": deleted}
 
 
 @shared_task

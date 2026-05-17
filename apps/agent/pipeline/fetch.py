@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 
 import requests
 
+from apps.agent.pipeline.rate_limit import get_default_limiter
+
 
 @dataclass(frozen=True)
 class FetchResult:
@@ -28,10 +30,13 @@ class FetchResult:
 def fetch_url_text(url: str, *, timeout: float = 20.0) -> FetchResult:
     """Fetch URL text for enrichment.
 
-    Full robots/rate-limit enforcement is the larger Phase 3/5 fetcher
-    work. This helper is intentionally small and test-injectable so
-    `run_enrich_new_app` can be validated without network access.
+    Per-domain throttle is enforced by ``DomainRateLimiter`` configured
+    from ``AGENT_RATE_LIMIT_RPS_PER_DOMAIN`` (defaults to 1.0 RPS). The
+    helper is still test-injectable: tests should pass their own
+    ``fetcher`` to ``run_enrich_new_app`` rather than mocking
+    ``requests`` here, so the throttle isn't exercised under unit tests.
     """
+    get_default_limiter().acquire(url)
     resp = requests.get(
         url,
         timeout=timeout,

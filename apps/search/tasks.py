@@ -11,6 +11,8 @@ from typing import List
 from celery import shared_task
 from django.contrib.postgres.search import SearchVector
 from django.db import transaction
+from django.db.models import TextField, Value
+from django.db.models.functions import Coalesce
 
 from apps.catalog.models import App
 
@@ -84,58 +86,56 @@ def refresh_search_vector_task(app_id: int) -> bool:
 def refresh_app_search_vector(app: App) -> None:
     """Refresh search vector for a single app instance.
 
-    Combines name, short_description, long_description, developer_name,
-    and related data into a search vector optimized for PostgreSQL
-    full-text search.
+    The ``search_vector`` GIN index is what ``/apps/?q=...`` actually
+    queries (``apps/search/views.py::app_search``). Indexing only the
+    four direct columns leaves platforms/categories/use-cases unsearchable
+    by FTS — historically the catalog fell back to trigram matching
+    over ``name`` only for those queries.
+
+    Strategy: collapse the related-data text into ``search_index_text``,
+    then build a single ``tsvector`` covering both the direct columns
+    AND that aggregated field. Two SQL statements because Postgres
+    UPDATE evaluates each SET clause against the pre-update row, so a
+    vector that references ``search_index_text`` must be built after
+    the text column has already been written.
     """
-    # Build search text components
-    search_components = []
-
-    if app.name:
-        search_components.append(f"A {app.name}")  # A weight for name
-
-    if app.short_description:
-        search_components.append(f"B {app.short_description}")  # B weight for short description
-
-    if app.developer_name:
-        search_components.append(f"B {app.developer_name}")  # B weight for developer
-
-    if app.long_description:
-        search_components.append(f"C {app.long_description}")  # C weight for long description
-
-    # Add platform names
-    platform_names = list(app.platforms.values_list('name', flat=True))
+    # Build search text components — pure metadata; assigned weight C
+    # so taxonomy hits never outrank a name match.
+    taxonomy_parts: list[str] = []
+    platform_names = list(app.platforms.values_list("name", flat=True))
     if platform_names:
-        search_components.append(f"B {' '.join(platform_names)}")
-
-    # Add category names
-    category_names = list(app.categories.values_list('name', flat=True))
+        taxonomy_parts.append(" ".join(platform_names))
+    category_names = list(app.categories.values_list("name", flat=True))
     if category_names:
-        search_components.append(f"C {' '.join(category_names)}")
-
-    # Add use case titles
-    use_case_titles = list(app.use_cases.values_list('title', flat=True))
+        taxonomy_parts.append(" ".join(category_names))
+    use_case_titles = list(app.use_cases.values_list("title", flat=True))
     if use_case_titles:
-        search_components.append(f"C {' '.join(use_case_titles)}")
+        taxonomy_parts.append(" ".join(use_case_titles))
 
-    # Combine all components
-    search_text = ' '.join(search_components)
+    search_index_text = " ".join(taxonomy_parts)
 
-    # Create search vector
-    search_vector = SearchVector(
-        'name', weight='A', config='english'
-    ) + SearchVector(
-        'short_description', weight='B', config='english'
-    ) + SearchVector(
-        'developer_name', weight='B', config='english'
-    ) + SearchVector(
-        'long_description', weight='C', config='english'
+    from apps.catalog.models import App
+
+    # 1. Persist the aggregated taxonomy text so the vector below can
+    #    reference it.
+    App.objects.filter(pk=app.pk).update(search_index_text=search_index_text)
+
+    # 2. Recompute the vector across direct columns + the freshly-written
+    #    taxonomy text. ``Coalesce`` keeps the SQL stable when any field
+    #    is NULL (older rows pre-default).
+    search_vector = (
+        SearchVector("name", weight="A", config="english")
+        + SearchVector("short_description", weight="B", config="english")
+        + SearchVector("developer_name", weight="B", config="english")
+        + SearchVector("long_description", weight="C", config="english")
+        + SearchVector(
+            Coalesce("search_index_text", Value(""), output_field=TextField()),
+            weight="C",
+            config="english",
+        )
     )
 
-    # Update the app using update() to avoid triggering signals
-    from apps.catalog.models import App
     App.objects.filter(pk=app.pk).update(
-        search_index_text=search_text,
         search_vector=search_vector
     )
 
@@ -195,3 +195,31 @@ def update_popular_searches() -> dict:
     except Exception as e:
         logger.error(f"Popular searches update failed: {e}")
         raise
+
+
+@shared_task
+def cleanup_old_search_logs(days_to_keep: int | None = None) -> dict:
+    """Trim ``SearchLog`` rows older than the configured retention window.
+
+    ``PopularSearch`` is rebuilt from this table by
+    ``update_popular_searches`` so a 90-day window comfortably covers
+    "what did users search for in the last quarter" without bloating
+    the DB.
+    """
+    from datetime import timedelta
+
+    from django.conf import settings as _settings
+    from django.utils import timezone
+
+    from .models import SearchLog
+
+    days = days_to_keep or int(
+        getattr(_settings, "SEARCH_LOG_RETENTION_DAYS", 90)
+    )
+    cutoff = timezone.now() - timedelta(days=days)
+    deleted, _ = SearchLog.objects.filter(created_at__lt=cutoff).delete()
+    logger.info(
+        "search_logs_cleanup_completed",
+        extra={"days_to_keep": days, "deleted": deleted},
+    )
+    return {"days_to_keep": days, "deleted": deleted}

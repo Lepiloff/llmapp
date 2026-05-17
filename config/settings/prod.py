@@ -1,12 +1,23 @@
 """Production settings — strict HTTPS, narrow allowlists, no debug."""
 from __future__ import annotations
 
+from django.core.exceptions import ImproperlyConfigured
 from decouple import Csv, config
 
 from .base import *  # noqa: F401,F403
 
 DEBUG = False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
+
+# SECRET_KEY hardening — base.py keeps an insecure default so dev / CI boot
+# without env. Production MUST provide a real key; refuse to start otherwise.
+SECRET_KEY = config("SECRET_KEY")
+_INSECURE_SECRET_KEY = "insecure-dev-key-change-me"
+if not SECRET_KEY or SECRET_KEY == _INSECURE_SECRET_KEY:
+    raise ImproperlyConfigured(
+        "SECRET_KEY is missing or set to the insecure development default. "
+        "Set a real, high-entropy SECRET_KEY in the production environment."
+    )
 
 # CSRF — Django requires the scheme+host of any cross-origin form/XHR
 # submission to be listed here. Default empty (only same-origin requests

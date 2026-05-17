@@ -13,34 +13,53 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
+SITEMAP_CACHE_PREFIX = "sitemap_v1"
+
+
+def invalidate_sitemap_cache() -> int:
+    """Drop every cached sitemap fragment.
+
+    ``cache_page`` stores entries under prefixed keys
+    (``views.decorators.cache.cache_page.<prefix>.GET.<...>``); the
+    ``django-redis`` backend supports glob-pattern deletion. Cache
+    backends without ``delete_pattern`` (e.g. local-memory in tests)
+    fall back to ``clear`` so the next request rebuilds.
+    """
+    from django.core.cache import cache
+
+    deleted = 0
+    delete_pattern = getattr(cache, "delete_pattern", None)
+    if delete_pattern is not None:
+        try:
+            deleted = int(delete_pattern(f"*{SITEMAP_CACHE_PREFIX}*") or 0)
+        except Exception:  # pragma: no cover - backend-specific failure
+            logger.exception("sitemap_cache_delete_pattern_failed")
+    else:
+        try:
+            cache.clear()
+        except Exception:  # pragma: no cover - backend-specific failure
+            logger.exception("sitemap_cache_clear_failed")
+    return deleted
+
+
 @shared_task
 def rebuild_sitemap() -> dict:
-    """Rebuild the sitemap files.
+    """Invalidate the sitemap cache so the next probe rebuilds.
 
-    This task is run periodically to ensure the sitemap stays
-    current with new content.
+    The sitemap view itself is wrapped in ``cache_page`` (30 min TTL).
+    The beat schedule runs this task every 30 minutes so a stale
+    sitemap never lives longer than that window; ``post_save`` on
+    published apps also calls into here for near-immediate freshness.
     """
-    try:
-        # Django doesn't have a built-in command to rebuild sitemaps,
-        # but we can trigger a request to the sitemap URL to regenerate it
-        from django.test import Client
-        from django.urls import reverse
+    deleted = invalidate_sitemap_cache()
+    result = {"status": "success", "cache_keys_deleted": deleted}
+    logger.info("sitemap_cache_invalidated", extra=result)
+    return result
 
-        client = Client()
 
-        # Ping the sitemap to regenerate it
-        response = client.get('/sitemap.xml')
-
-        if response.status_code == 200:
-            logger.info("Sitemap rebuilt successfully")
-            return {'status': 'success', 'status_code': response.status_code}
-        else:
-            logger.error(f"Sitemap rebuild failed with status {response.status_code}")
-            return {'status': 'error', 'status_code': response.status_code}
-
-    except Exception as e:
-        logger.error(f"Sitemap rebuild failed: {e}")
-        raise
+# Hard timeout for ping_search_engines — a slow Google/Bing response would
+# otherwise pin the Celery worker indefinitely (urlopen defaults to no timeout).
+_PING_TIMEOUT_SECONDS = 10
 
 
 @shared_task
@@ -50,7 +69,6 @@ def ping_search_engines() -> dict:
     Notifies Google and Bing that the sitemap has been updated.
     """
     import urllib.request
-    from urllib.parse import urlencode
     from django.conf import settings
 
     sitemap_url = f"{settings.SITE_BASE_URL}/sitemap.xml"
@@ -59,7 +77,7 @@ def ping_search_engines() -> dict:
     # Google
     try:
         google_ping_url = f"https://www.google.com/ping?sitemap={sitemap_url}"
-        urllib.request.urlopen(google_ping_url)
+        urllib.request.urlopen(google_ping_url, timeout=_PING_TIMEOUT_SECONDS)
         results['google'] = 'success'
         logger.info("Successfully pinged Google about sitemap update")
     except Exception as e:
@@ -69,7 +87,7 @@ def ping_search_engines() -> dict:
     # Bing
     try:
         bing_ping_url = f"https://www.bing.com/ping?sitemap={sitemap_url}"
-        urllib.request.urlopen(bing_ping_url)
+        urllib.request.urlopen(bing_ping_url, timeout=_PING_TIMEOUT_SECONDS)
         results['bing'] = 'success'
         logger.info("Successfully pinged Bing about sitemap update")
     except Exception as e:
