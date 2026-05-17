@@ -23,10 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # whatever pyproject.toml declares; CI also installs the same list so
 # drift is impossible.
 #
-# README.md is referenced by pyproject.toml.readme — copy it first so
-# the install step doesn't break when the rest of the source is later
-# COPY'd in (and so this layer doesn't bust on unrelated code edits).
-COPY pyproject.toml README.md /app/
+# pyproject.toml's [tool.setuptools] declares packages = [], so this
+# resolves dependencies without trying to bundle the Django app as a
+# wheel. README.md is intentionally not COPY'd — .dockerignore excludes
+# it and pyproject.toml doesn't reference it, so the install layer
+# rebuilds only when dependencies actually change.
+COPY pyproject.toml /app/
 RUN pip install --upgrade pip && pip install .
 
 # Copy application code
