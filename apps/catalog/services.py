@@ -223,9 +223,15 @@ def merge_use_cases(
         use_case_id__in=valid_source_ids
     )
 
+    # Collect every app whose use-case set changes — search_vector
+    # includes use_case titles (Sprint 1, see apps/search/tasks.py),
+    # and direct through-table writes skip the m2m_changed signal
+    # that normally schedules the refresh.
+    affected_app_ids: set[int] = set()
     reassigned = 0
     deduplicated = 0
     for row in source_rows:
+        affected_app_ids.add(row.app_id)
         if row.app_id in apps_with_target:
             row.delete()
             deduplicated += 1
@@ -236,6 +242,19 @@ def merge_use_cases(
             reassigned += 1
 
     deleted_use_cases, _ = UseCase.objects.filter(pk__in=valid_source_ids).delete()
+
+    # Re-index every affected app after commit so the canonical
+    # use-case title makes it into search_vector and the deleted
+    # synonyms stop matching FTS queries.
+    if affected_app_ids:
+        from apps.search.tasks import refresh_search_vector_task
+
+        def _refresh() -> None:
+            for app_id in affected_app_ids:
+                refresh_search_vector_task.delay(app_id)
+
+        transaction.on_commit(_refresh)
+
     return {
         "reassigned": reassigned,
         "deduplicated": deduplicated,

@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -76,3 +77,20 @@ def test_resolved_entries_dont_count(admin_client, app) -> None:
     response = admin_client.get(url)
     body = response.content.decode()
     assert "OK" in body
+
+
+@override_settings(AGENT_REVIEW_QUEUE_SLA_DAYS=3)
+def test_sla_window_honors_settings_override(admin_client, app) -> None:
+    """A tightened SLA via settings must reshape the dashboard.
+
+    An entry 5 days old is not overdue at the default 14d but IS
+    overdue when the window is dropped to 3d via env / settings.
+    """
+    _make_entry(app, days_ago=5)
+
+    url = reverse("admin:agent_needsreviewqueueentry_sla_dashboard")
+    response = admin_client.get(url)
+    body = response.content.decode()
+    assert "OVERDUE" in body
+    # The threshold renders on the page so editors see what window's active.
+    assert "3 days" in body or "3</strong>" in body

@@ -27,9 +27,22 @@ logger = logging.getLogger(__name__)
 _OUTBOUND_RATE = "60/m"
 
 
+def _xff_aware_ip_key(_group, request: HttpRequest) -> str:
+    """Custom django-ratelimit key that respects X-Forwarded-For.
+
+    The default ``key='ip'`` reads ``REMOTE_ADDR``, which behind nginx /
+    ALB is the proxy's address — all real clients would share one
+    bucket and a single noisy user would 403 outbound clicks for
+    everyone. We mirror ``apps.analytics.utils.get_client_ip`` which
+    picks the first hop from ``X-Forwarded-For``, so the same client
+    IP policy applies across click tracking and throttling.
+    """
+    return get_client_ip(request) or "unknown"
+
+
 @never_cache
 @require_http_methods(["GET"])
-@ratelimit(key="ip", rate=_OUTBOUND_RATE, method="GET", block=True)
+@ratelimit(key=_xff_aware_ip_key, rate=_OUTBOUND_RATE, method="GET", block=True)
 def outbound_redirect(request: HttpRequest, slug: str) -> HttpResponse:
     """Tracked outbound redirect for app links.
 

@@ -83,3 +83,36 @@ def test_unknown_source_ids_silently_skipped(use_cases) -> None:
 def test_missing_target_raises(use_cases) -> None:
     with pytest.raises(ValueError):
         merge_use_cases(999_999, [use_cases["syn_a"].pk])
+
+
+def test_merge_enqueues_search_vector_refresh_for_affected_apps(
+    apps, use_cases, django_capture_on_commit_callbacks, monkeypatch
+) -> None:
+    """Merging through the through-table bypasses m2m_changed, so the
+    service must schedule search_vector refresh by hand. Otherwise
+    FTS would keep matching the deleted synonym title until the
+    nightly batch rebuild.
+    """
+    refreshed: list[int] = []
+
+    class _DummyTask:
+        def delay(self, app_id):
+            refreshed.append(app_id)
+
+    monkeypatch.setattr(
+        "apps.search.tasks.refresh_search_vector_task", _DummyTask()
+    )
+
+    a, b, _ = apps
+    from apps.catalog.models import AppUseCase
+
+    AppUseCase.objects.create(app=a, use_case=use_cases["syn_a"])
+    AppUseCase.objects.create(app=b, use_case=use_cases["syn_b"])
+
+    with django_capture_on_commit_callbacks(execute=True):
+        merge_use_cases(
+            use_cases["target"].pk,
+            [use_cases["syn_a"].pk, use_cases["syn_b"].pk],
+        )
+
+    assert set(refreshed) == {a.pk, b.pk}

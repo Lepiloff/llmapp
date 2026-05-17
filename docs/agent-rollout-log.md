@@ -810,14 +810,46 @@ Regressions: `tests/catalog/test_merge_use_cases.py` (+5).
 **P2.15 — SLA dashboard for the review queue.**
 `/admin/agent/needsreviewqueueentry/sla-dashboard/` — one-page
 snapshot for the editor backlog. Reports: pending count, overdue
-count (>`SLA_PENDING_DAYS=14` days unresolved), oldest age in days,
-breakdown by kind, top-10 oldest pending entries with deep links.
-Status block flips between OK and OVERDUE. Editors and oncall use
-this instead of filtering the changelist by hand. Custom URL
-registered via `NeedsReviewQueueEntryAdmin.get_urls`; reachable URL
-also stashed in `extra_context['sla_dashboard_url']` for any
-future changelist-template integration. Regressions:
-`tests/agent/test_sla_dashboard.py` (+3).
+count (>`AGENT_REVIEW_QUEUE_SLA_DAYS=14` days unresolved), oldest
+age in days, breakdown by kind, top-10 oldest pending entries with
+deep links. Status block flips between OK and OVERDUE. Editors
+and oncall use this instead of filtering the changelist by hand.
+Custom URL registered via `NeedsReviewQueueEntryAdmin.get_urls`;
+reachable URL also stashed in `extra_context['sla_dashboard_url']`
+for any future changelist-template integration. Threshold is read
+from Django settings at request time so operators tune the SLA
+without a code release. Regressions: `tests/agent/test_sla_dashboard.py`
+(+4).
+
+**Sprint 2 follow-up (post-review fixes, same day):**
+Three tightening items landed on top of the initial Sprint 2 commits
+after a second-pass review:
+1. **`/go/` rate-limit now XFF-aware.**
+   `key='ip'` reads `REMOTE_ADDR`, which behind nginx / ALB is the
+   proxy's address — every real client would share one bucket and a
+   single noisy user could 403 outbound clicks for everyone.
+   Replaced with a callable `_xff_aware_ip_key` that mirrors
+   `apps.analytics.utils.get_client_ip`, picking the first hop from
+   `X-Forwarded-For`. Same client-IP policy now applies across click
+   tracking and throttling. Regression:
+   `test_throttle_bucket_keyed_by_xff_not_remote_addr`.
+2. **UseCase merge refreshes search vectors.**
+   `merge_use_cases` mutates `AppUseCase` rows through the ORM
+   directly, bypassing the `m2m_changed` signal that
+   `apps/catalog/signals.py` uses to schedule search-vector refresh
+   on use-case writes. Sprint 1 made use_case titles part of
+   `search_vector`, so merged apps were keeping stale matches for
+   the deleted synonym title until the nightly rebuild. Fix:
+   collect affected `app_ids` during the merge, then
+   `transaction.on_commit` enqueue `refresh_search_vector_task.delay`
+   for each. Regression: `test_merge_enqueues_search_vector_refresh_for_affected_apps`.
+3. **SLA window actually configurable.**
+   `SLA_PENDING_DAYS = 14` was hard-coded despite the comment
+   claiming env-configurability. Added
+   `AGENT_REVIEW_QUEUE_SLA_DAYS` setting (default 14), a
+   `_sla_pending_days()` helper that reads it at request time, and
+   documented the env in `.env.example`. Regression:
+   `test_sla_window_honors_settings_override`.
 
 ---
 

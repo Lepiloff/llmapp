@@ -451,6 +451,13 @@ AGENT_REACTUALIZATION_BATCH_SIZE = config(
     "AGENT_REACTUALIZATION_BATCH_SIZE", default=20, cast=int
 )
 
+# SLA window for the editor review queue. Pending NeedsReviewQueueEntry
+# rows older than this many days are flagged "overdue" on the SLA
+# dashboard at /admin/agent/needsreviewqueueentry/sla-dashboard/.
+AGENT_REVIEW_QUEUE_SLA_DAYS = config(
+    "AGENT_REVIEW_QUEUE_SLA_DAYS", default=14, cast=int
+)
+
 # Retention windows for unbounded audit-trail tables. Each cleanup task is
 # scheduled in CELERY_BEAT_SCHEDULE; tweaking the env var changes the
 # cutoff without a code redeploy.

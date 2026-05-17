@@ -153,10 +153,30 @@ class LLMCallLogAdmin(admin.ModelAdmin):
         return False
 
 
-# SLA threshold for the oldest pending entry. Configurable via Django
-# settings if operators want it tighter; default is 14 days, matching the
-# editor-cadence acceptance criteria from docs/agent-pipeline.md Phase 1.
-SLA_PENDING_DAYS = 14
+# SLA threshold for pending review-queue entries. Default 14 days
+# matches the editor-cadence acceptance criteria in
+# docs/agent-pipeline.md Phase 1. Operators tighten it via the
+# AGENT_REVIEW_QUEUE_SLA_DAYS env var; the constant below is only a
+# fallback used when the setting is unset.
+_DEFAULT_SLA_PENDING_DAYS = 14
+
+
+def _sla_pending_days() -> int:
+    """Read the configured SLA window at request time so tests can
+    override it via ``override_settings``."""
+    from django.conf import settings as _settings
+
+    return int(
+        getattr(_settings, "AGENT_REVIEW_QUEUE_SLA_DAYS", _DEFAULT_SLA_PENDING_DAYS)
+        or _DEFAULT_SLA_PENDING_DAYS
+    )
+
+
+# Back-compat re-export for callers that imported the constant directly
+# (and the existing Sprint 2 regression). Kept as the default value, not a
+# live setting read — anything wanting the *configured* window must call
+# ``_sla_pending_days()``.
+SLA_PENDING_DAYS = _DEFAULT_SLA_PENDING_DAYS
 
 
 @admin.register(NeedsReviewQueueEntry)
@@ -245,8 +265,9 @@ class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
         """
         from django.db.models import F
 
+        sla_days = _sla_pending_days()
         now = timezone.now()
-        sla_cutoff = now - timedelta(days=SLA_PENDING_DAYS)
+        sla_cutoff = now - timedelta(days=sla_days)
 
         pending = NeedsReviewQueueEntry.objects.filter(resolved_at__isnull=True)
         pending_count = pending.count()
@@ -280,7 +301,7 @@ class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
             **self.admin_site.each_context(request),
             "title": "Editor review SLA dashboard",
             "opts": self.model._meta,
-            "sla_days": SLA_PENDING_DAYS,
+            "sla_days": sla_days,
             "pending_count": pending_count,
             "overdue_count": overdue_count,
             "oldest_age_days": oldest_age_days,

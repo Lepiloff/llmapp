@@ -72,3 +72,35 @@ def test_first_request_under_cap_records_click(client, published_app) -> None:
     response = client.get(_go_url(published_app))
     assert response.status_code == 302
     assert ClickEvent.objects.filter(app=published_app).count() == 1
+
+
+@pytest.mark.django_db
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "ratelimit-tests-xff",
+        }
+    },
+)
+def test_throttle_bucket_keyed_by_xff_not_remote_addr(client, published_app) -> None:
+    """Behind nginx/ALB, the throttle must key on X-Forwarded-For.
+
+    Otherwise every real client shares the proxy's REMOTE_ADDR and a
+    single user can 403 outbound clicks for everyone else.
+    """
+    url = _go_url(published_app)
+
+    # 60 requests from client A — fills its bucket.
+    for _ in range(60):
+        response = client.get(url, HTTP_X_FORWARDED_FOR="203.0.113.1")
+        assert response.status_code == 302
+
+    # 61st from client A is blocked.
+    blocked = client.get(url, HTTP_X_FORWARDED_FOR="203.0.113.1")
+    assert blocked.status_code == 403
+
+    # But client B, behind the same proxy (same REMOTE_ADDR), still has
+    # its own bucket and passes.
+    ok = client.get(url, HTTP_X_FORWARDED_FOR="203.0.113.2")
+    assert ok.status_code == 302
