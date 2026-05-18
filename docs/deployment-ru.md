@@ -1,17 +1,20 @@
-# Деплой LLM App Market на EC2
+# Деплой LLM App Market
 
-Документ описывает первичный деплой проекта на свежий EC2-инстанс
-плюс операции "дня 2" (rebuild, rollback, мониторинг). Целевой стек:
-Docker Compose на EC2 + managed Postgres + ElastiCache Redis +
-домен `llmappmarket.com`.
+Первичный деплой проекта + операции «дня 2» (rebuild, rollback,
+мониторинг). Стек: Docker Compose на EC2 + managed Postgres +
+ElastiCache Redis + домен `llmappmarket.com`.
+
+Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
+вынесены в [`docs/pre-launch-checklist.md`](pre-launch-checklist.md) —
+этот документ покрывает только техническую часть.
 
 ## Содержание
 
 1. [Pre-requisites](#pre-requisites)
-2. [Архитектура deploy](#архитектура-deploy)
+2. [Архитектура](#архитектура)
 3. [Переменные окружения](#переменные-окружения)
 4. [Первичный деплой](#первичный-деплой)
-5. [Post-deploy smoke checks](#post-deploy-smoke-checks)
+5. [Smoke checks](#smoke-checks)
 6. [Включение background-задач](#включение-background-задач)
 7. [Операции дня 2](#операции-дня-2)
 8. [Rollback](#rollback)
@@ -21,228 +24,147 @@ Docker Compose на EC2 + managed Postgres + ElastiCache Redis +
 
 ## Pre-requisites
 
-Должно быть готово до деплоя:
-
 | Компонент | Что нужно |
 |---|---|
-| EC2 инстанс | Ubuntu 22.04+, минимум 2 vCPU / 4 GB RAM, открыты порты 80 + 443. Docker + docker-compose-plugin установлены |
-| Domain | `llmappmarket.com` + `www.llmappmarket.com` указывают A-records на EC2 IP. SSL через Let's Encrypt (nginx + certbot) или ALB+ACM |
-| Postgres | Managed (RDS) или Postgres 16 на отдельной EC2. Создана БД `llmmarket` + пользователь с полными правами. Расширение `pg_trgm` доступно для CREATE EXTENSION (rds.force_ssl=1 не блокирует, но проверь параметрами) |
-| Redis | ElastiCache или Redis 7 на отдельном инстансе. Открыт TCP 6379 только из security group EC2 |
-| OpenAI API | API key с активным billing, доступ к моделям `gpt-5.4-mini` (primary) и `gpt-5.4-nano` (cheap) |
-| GitHub token | Fine-grained PAT с read-only public-repo scope. 30 req/min на Search API и 5000 req/h на Contents (без токена — 10/мин, упрётесь на первом же discovery batch) |
-| SMTP | Любой transactional-провайдер (SES / SendGrid / Mailgun) для review queue digest и budget alerts |
+| EC2 | Ubuntu 22.04+, 2 vCPU / 4 GB RAM, открыты 80 + 443. Docker + docker-compose-plugin |
+| Domain | `llmappmarket.com` + `www.…` указывают на EC2 IP. TLS — Cloudflare proxy (proще всего, уже используем для Turnstile) или Caddy / nginx+certbot |
+| Postgres | RDS или Postgres 16 на отдельной EC2. БД `llmmarket` + пользователь. `pg_trgm` доступен для CREATE EXTENSION |
+| Redis | ElastiCache или Redis 7. Открыт 6379 только из SG EC2 |
+| OpenAI | API key с активным billing, доступ к `gpt-5.4-mini` + `gpt-5.4-nano` |
+| GitHub | Fine-grained PAT, read-only public-repo scope (30 req/min на Search + 5000/h на Contents) |
+| SMTP | SES / SendGrid / Postmark для review-digest и budget alerts |
+| S3-совместимый bucket | Для off-host backup'ов (`pg_backup` сервис) |
 
 ---
 
-## Архитектура deploy
+## Архитектура
 
-`docker-compose.yml` поднимает 5 сервисов:
+`docker-compose.yml` поднимает 5 сервисов + 1 опциональный backup-runner:
 
 ```
                    ┌────────────┐
-                   │   web      │  gunicorn, обрабатывает HTTP
-                   │  (Django)  │  /health/, публичные страницы, admin
+                   │   web      │  gunicorn + WhiteNoise (static)
+                   │  (Django)  │  /health/, /api/v1/*, /admin/, страницы
                    └─────┬──────┘
                          │ async tasks
                          ▼
 ┌──────────┐      ┌────────────┐      ┌──────────────┐
 │ postgres │ ◄──► │   worker   │ ◄──► │    redis     │
-│   (16)   │      │  (celery)  │      │ (broker+cache)│
-└──────────┘      └────────────┘      └──────────────┘
-                         ▲
-                         │ schedules
-                  ┌──────┴─────┐
-                  │   beat     │  django_celery_beat, DatabaseScheduler
-                  │ (celery)   │  раз в минуту проверяет расписание
-                  └────────────┘
+│   (16)   │      │  (celery)  │      │ (broker+rate │
+└──────────┘      └────────────┘      │  limit+cache)│
+      ▲                  ▲             └──────────────┘
+      │                  │ schedules
+      │           ┌──────┴─────┐
+      │           │   beat     │  django_celery_beat, ~19 cron-задач
+      │           │ (celery)   │  (discovery, retention, sitemap, …)
+      │           └────────────┘
+      │
+┌─────┴───────┐
+│  pg_backup  │  postgres:16 + awscli, profile=production
+│  (runner)   │  → pg_dump в named volume + опц. S3 upload
+└─────────────┘
 ```
 
-* **web** — gunicorn внутри контейнера; принимает HTTPS-трафик от nginx/ALB
-* **worker** — Celery, исполняет агентный pipeline (LLM-вызовы, link checks,
-  re-actualization, search vector refresh, sitemap rebuild)
-* **beat** — Celery beat scheduler; держит расписание 10 cron-задач в БД
-* **postgres** + **redis** — в проде заменяются на managed-сервисы, в
-  docker-compose оставлены только для локальной разработки
+* **web** — gunicorn в контейнере. WhiteNoise отдаёт `/static/*` напрямую
+  с cache-busting hashes, nginx-фронт необязателен.
+* **worker** — Celery, исполняет LLM-pipeline, link checks, re-actualization,
+  search-vector refresh, sitemap rebuild, retention cleanup.
+* **beat** — Celery beat scheduler.
+* **pg_backup** — отдельный prod-only сервис. Картинка
+  `docker/Dockerfile.pg_backup` (pg_dump + awscli baked in, без apt-install
+  на старте). Бэкап-цикл: dump → gzip → опц. S3 upload → trim
+  retention → sleep.
+* **postgres / redis** — в проде заменяются на managed-сервисы через
+  `DATABASE_URL` / `REDIS_URL`.
 
-На прод EC2 typically остаются `web`, `worker`, `beat`; `postgres` и
-`redis` указываются через `DATABASE_URL` / `CELERY_BROKER_URL`.
+На EC2 typically запущены: `web`, `worker`, `beat`, `pg_backup` (через
+`--profile production`).
 
 ---
 
 ## Переменные окружения
 
-Полный список — в `.env.example`. Ниже разбит по приоритету.
+**Полный список с комментариями — в [`.env.example`](../.env.example) и
+[`.env.production`](../.env.production).** Здесь — только ключевые
+callout'ы.
 
-### 🔴 Required (без них контейнер не стартует или работает небезопасно)
+### 🔴 Required — без них boot падает или работа небезопасна
 
-```bash
-# Базовое
-SECRET_KEY=<86+ chars random>          # python -c 'import secrets; print(secrets.token_urlsafe(64))'
-DEBUG=False                            # неявно через config/settings/prod.py
-DJANGO_SETTINGS_MODULE=config.settings.prod
-ALLOWED_HOSTS=llmappmarket.com,www.llmappmarket.com
-CSRF_TRUSTED_ORIGINS=https://llmappmarket.com,https://www.llmappmarket.com
-SITE_BASE_URL=https://llmappmarket.com   # используется в admin-emails для абсолютных URL
-
-# БД и broker
-DATABASE_URL=postgres://user:pass@rds-endpoint:5432/llmmarket
-CELERY_BROKER_URL=redis://elasticache-endpoint:6379/0
-REDIS_URL=redis://elasticache-endpoint:6379/0
-
-# LLM
-AGENT_LLM_PROVIDER_PRIMARY=openai
-AGENT_LLM_MODEL_PRIMARY=gpt-5.4-mini
-AGENT_LLM_PROVIDER_CHEAP=openai
-AGENT_LLM_MODEL_CHEAP=gpt-5.4-nano
-OPENAI_API_KEY=sk-proj-...
-
-# Цены LLM (используются для расчёта стоимости каждого вызова + бюджетных латчей)
-AGENT_OPENAI_PRIMARY_INPUT_COST_PER_1M_TOKENS=0.75
-AGENT_OPENAI_PRIMARY_CACHED_COST_PER_1M_TOKENS=0.075
-AGENT_OPENAI_PRIMARY_OUTPUT_COST_PER_1M_TOKENS=4.50
-AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS=0.20
-AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS=0.02
-AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS=1.25
-
-# Бюджет
-AGENT_MONTHLY_BUDGET_USD=20
-```
+* `SECRET_KEY` — высокоэнтропийный (`python -c 'import secrets; print(secrets.token_urlsafe(64))'`). **Прод-settings hard-fail'ят с пустым или дефолтным insecure значением.**
+* `DJANGO_SETTINGS_MODULE=config.settings.prod`
+* `ALLOWED_HOSTS=llmappmarket.com,www.llmappmarket.com`
+* `CSRF_TRUSTED_ORIGINS=https://llmappmarket.com,https://www.llmappmarket.com`
+* `SITE_BASE_URL=https://llmappmarket.com`
+* `DATABASE_URL` + `REDIS_URL` + `CELERY_BROKER_URL`
+* `OPENAI_API_KEY` + `AGENT_LLM_MODEL_PRIMARY` + `AGENT_LLM_MODEL_CHEAP`
+* 6 `AGENT_OPENAI_*_COST_PER_1M_TOKENS` ключей (используются для cost
+  attribution и budget hard-stop)
+* `AGENT_MONTHLY_BUDGET_USD` — обязательно. Прод бутится с budget=0 →
+  hard-stop сработает сразу.
 
 ### 🟡 Strongly recommended
 
-```bash
-# Discovery / GitHub
-GITHUB_TOKEN=github_pat_...
+* `GITHUB_TOKEN` — для discovery, без него Search API упрётся на 10 req/min.
+* `SENTRY_DSN` — без него прод-инциденты не видны.
+* `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` — иначе `/submit/` обходится скриптами.
+* `EMAIL_HOST` + `EMAIL_HOST_USER` + `EMAIL_HOST_PASSWORD` — для review-digest и budget alerts.
+* `AGENT_REVIEW_DIGEST_EMAILS` / `AGENT_BUDGET_ALERT_EMAILS` / `SUBMISSIONS_NOTIFY_EMAILS`.
 
-# Алерты по бюджету (80% / 100%)
-AGENT_BUDGET_ALERT_EMAILS=ops@llmappmarket.com
+### 🟢 Feature flags — выключены по умолчанию
 
-# Editorial / review queue digest (07:30 UTC ежедневно)
-AGENT_REVIEW_DIGEST_EMAILS=editorial@llmappmarket.com
-SUBMISSIONS_NOTIFY_EMAILS=editorial@llmappmarket.com
+* `AGENT_SOURCES_ENABLED=` — discovery off. Включить: `github_mcp,rss`.
+* `AGENT_REACTUALIZATION_ENABLED=False`.
+* `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0` — enforced cross-process через Redis.
 
-# CORS (если будет фронтенд на отдельном поддомене)
-CORS_ALLOWED_ORIGINS=https://app.llmappmarket.com
+### 🟣 Backup (production profile)
 
-# Email transport
-EMAIL_HOST=email-smtp.eu-west-1.amazonaws.com
-EMAIL_HOST_USER=AKIA...
-EMAIL_HOST_PASSWORD=...
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-DEFAULT_FROM_EMAIL=noreply@llmappmarket.com
+* `PG_BACKUP_S3_BUCKET=` — пусто = только локальный named-volume.
+* `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_DEFAULT_REGION` — IAM с write-only на bucket.
+* `PG_BACKUP_RETENTION_DAYS=14`, `PG_BACKUP_INTERVAL_SECONDS=86400`.
 
-# Sentry
-SENTRY_DSN=https://...@sentry.io/...
+### Bootstrap superuser (первый запуск)
 
-# Cloudflare Turnstile (если включаешь капчу на /submit/)
-TURNSTILE_SITE_KEY=...
-TURNSTILE_SECRET_KEY=...
+Все три задать → entrypoint создаёт суперюзера если ещё нет:
 ```
-
-### 🟢 Optional / feature flags (выключены по умолчанию)
-
-```bash
-# Phase 4 re-actualization beat
-AGENT_REACTUALIZATION_ENABLED=False              # → True когда готов запускать
-AGENT_REACTUALIZATION_INTERVAL_DAYS=30
-AGENT_REACTUALIZATION_BATCH_SIZE=20
-
-# Phase 3 discovery sources
-AGENT_SOURCES_ENABLED=                           # пусто = вся discovery выключена
-# Включить: AGENT_SOURCES_ENABLED=github_mcp,rss
-
-# Прочее
-AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0
-CELERY_TASK_ALWAYS_EAGER=False
-MCP_REGISTRY_BASE_URL=https://registry.modelcontextprotocol.io/v1
+DJANGO_SUPERUSER_USERNAME / _EMAIL / _PASSWORD
 ```
-
-### Bootstrap superuser (опционально, только на первом запуске)
-
-```bash
-DJANGO_SUPERUSER_USERNAME=admin
-DJANGO_SUPERUSER_EMAIL=admin@llmappmarket.com
-DJANGO_SUPERUSER_PASSWORD=<strong-password>
-```
-
-При наличии всех трёх — entrypoint создаст суперпользователя при первом
-старте если ещё нет. На второй запуск переменные можно убрать.
+После первого boot переменные можно убрать.
 
 ---
 
 ## Первичный деплой
 
-### Шаг 1. Подготовка инстанса
-
 ```bash
-# На EC2
+# 1. Подготовить EC2
 sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
-sudo usermod -aG docker ubuntu  # разлогиниться/залогиниться
+sudo usermod -aG docker ubuntu                 # relogin
+
+# 2. Клонировать и настроить env
+cd /opt && sudo git clone https://github.com/<you>/llmmarket.git
+sudo chown -R ubuntu:ubuntu llmmarket && cd llmmarket
+cp .env.production .env
+nano .env                                       # заполнить по списку выше
+
+# 3. Собрать и поднять
+docker compose --profile production up -d --build
 ```
 
-### Шаг 2. Клонирование репозитория
+Первая сборка 3-5 минут. Entrypoint автоматически: ждёт Postgres+Redis →
+migrate → seed reference data (платформы / категории / capabilities /
+listing-types) → опц. createsuperuser → запускает процесс.
 
-```bash
-cd /opt
-sudo git clone https://github.com/<you>/llmmarket.git
-sudo chown -R ubuntu:ubuntu llmmarket
-cd llmmarket
-```
+### nginx / TLS
 
-### Шаг 3. Создание `.env`
-
-```bash
-cp .env.example .env
-# отредактировать .env по списку Required выше:
-nano .env
-```
-
-### Шаг 4. Сборка образов
-
-```bash
-docker compose build web worker beat
-```
-
-Занимает 3-5 минут на первой сборке.
-
-### Шаг 5. Запуск контейнеров
-
-```bash
-docker compose up -d web worker beat
-```
-
-При первом старте entrypoint:
-1. Дожидается готовности Postgres и Redis
-2. Применяет миграции (`migrate --noinput`)
-3. Сидит reference-данные (`seed_demo` — платформы / категории / capabilities / listing-types)
-4. Если переменные `DJANGO_SUPERUSER_*` заданы — создаёт суперюзера
-5. Запускает соответствующий процесс (gunicorn / celery worker / celery beat)
-
-### Шаг 6. Verify health
-
-```bash
-docker compose ps                                # все healthy
-docker compose exec web curl http://localhost:8000/health/
-# ожидаем: {"status":"ok","checks":{"db":true,"redis":true,"pg_trgm":true}}
-```
-
-### Шаг 7. nginx + SSL
-
-Reverse-proxy с nginx на 8000-й порт + Let's Encrypt:
+WhiteNoise отдаёт `/static/*` сам, поэтому nginx нужен **только если
+ты не используешь Cloudflare proxy**. Минимальный конфиг:
 
 ```nginx
 server {
-    server_name llmappmarket.com www.llmappmarket.com;
     listen 443 ssl http2;
-    ssl_certificate     /etc/letsencrypt/live/llmappmarket.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/llmappmarket.com/privkey.pem;
-
+    server_name llmappmarket.com www.llmappmarket.com;
+    ssl_certificate     /etc/letsencrypt/.../fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/.../privkey.pem;
     client_max_body_size 10m;
-
-    location /static/ { alias /opt/llmmarket/staticfiles/; }
-    location /media/  { alias /opt/llmmarket/media/; }
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -251,277 +173,227 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 }
-server {
-    listen 80;
-    server_name llmappmarket.com www.llmappmarket.com;
-    return 301 https://$host$request_uri;
-}
+server { listen 80; server_name llmappmarket.com www.…; return 301 https://$host$request_uri; }
 ```
+
+С Cloudflare proxy всё проще: TLS на их стороне, gunicorn слышит HTTP,
+нужно только настроить origin-pull rule.
 
 ---
 
-## Post-deploy smoke checks
+## Smoke checks
 
-После старта контейнеров и настройки nginx прогнать:
-
-### Web smoke (5 секунд)
+После старта прогнать (5 минут):
 
 ```bash
-curl -fsS https://llmappmarket.com/health/         # → {"status":"ok",...}
-curl -fsS https://llmappmarket.com/                # → 200 HTML, есть "Trending now"
-curl -fsS https://llmappmarket.com/apps/           # → 200, листинг
-curl -fsS https://llmappmarket.com/sitemap.xml     # → 200 XML
-curl -fsS https://llmappmarket.com/robots.txt      # → 200
-curl -sw '%{http_code}\n' -o /dev/null \
-     https://llmappmarket.com/apps/no-such-slug/   # → 404 (ожидаемо)
+# Health (4 чека: DB, Redis, pg_trgm, celery_worker)
+curl -fsS https://llmappmarket.com/health/
+# → {"status":"ok","checks":{"db":true,"redis":true,"pg_trgm":true,"celery_worker":true}}
+
+# Public страницы
+curl -fsS https://llmappmarket.com/ | grep -q "Trending now" && echo OK
+curl -fsS https://llmappmarket.com/apps/ | head -c 200
+curl -fsS https://llmappmarket.com/sitemap.xml | head -3
+curl -fsS https://llmappmarket.com/robots.txt
+curl -sw '%{http_code}\n' -o /dev/null https://llmappmarket.com/apps/no-such/  # → 404
+
+# Public API (Sprint 3)
+curl -fsS https://llmappmarket.com/api/v1/apps/?page_size=2
+curl -fsS https://llmappmarket.com/api/v1/platforms/
+curl -sI  https://llmappmarket.com/api/v1/docs              # OpenAPI Swagger
+
+# CSP headers (Sprint 3) — должен быть Content-Security-Policy header
+curl -sI https://llmappmarket.com/ | grep -i content-security
 ```
 
-### Admin smoke
+### Admin
 
-1. Открыть `https://llmappmarket.com/admin/`
-2. Залогиниться суперпользователем
-3. Проверить что доступны: AgentRun, BudgetMonthState, NeedsReviewQueueEntry,
-   App, Source, LinkHealth
-4. Открыть `https://llmappmarket.com/admin/agent/agentrun/cost-dashboard/`
-   — должна отобразиться dashboard с пустым / минимальным spend
+1. `/admin/` → залогиниться суперпользователем.
+2. Доступны: AgentRun, BudgetMonthState, NeedsReviewQueueEntry, App,
+   Source, LinkHealth, TrendingScore.
+3. `/admin/agent/agentrun/cost-dashboard/` — dashboard рендерится.
+4. `/admin/agent/needsreviewqueueentry/sla-dashboard/` — SLA-snapshot
+   (Sprint 2) — должен показать «OK» при пустой очереди.
 
-### Agent pipeline dry-run smoke
-
-Из контейнера, чтобы не сжечь токены случайно:
+### Beat schedule
 
 ```bash
-# Gate report (без LLM вызовов — читает БД)
-docker compose exec web python manage.py agent_phase3_report
-
-# Cost backfill (dry-run, без записи)
-docker compose exec web python manage.py agent_backfill_costs --dry-run
-
-# Бюджетная проверка — пишет/обновляет BudgetMonthState
-docker compose exec web python manage.py shell -c \
-  "from apps.agent.tasks import agent_budget_check; print(agent_budget_check())"
+docker compose exec web python manage.py shell -c "
+from django_celery_beat.models import PeriodicTask
+for t in PeriodicTask.objects.order_by('name'):
+    print(t.name, t.enabled)
+"
 ```
 
-### Beat schedule loaded
+Ожидаемо ~19 enabled задач: ingest, discovery×2, re-actualize, link
+checker, budget check, review digest, sitemap rebuild, sitemap ping,
+trending scores, search vectors, popular searches, SEO reports,
+quality recalc, newsletter draft, retention × 4 (agent/links/searches/analytics).
+
+### pg_backup (production profile)
 
 ```bash
-docker compose logs beat | grep "DatabaseScheduler:"
-# должно быть: "DatabaseScheduler: Schedule changed."
-
-docker compose exec web python manage.py shell -c \
-  "from django_celery_beat.models import PeriodicTask;
-   [print(t.name, t.enabled) for t in PeriodicTask.objects.all().order_by('name')]"
+docker compose --profile production logs pg_backup --tail=20
+# → "📦 dumping → /backups/llmmarket-…sql.gz"
+# → "✅ dump complete (NNN K)"
+# → если PG_BACKUP_S3_BUCKET задан: "✅ s3 upload complete"
 ```
-
-Ожидаем 10 enabled задач:
-- `agent_budget_check`
-- `agent_discover_github_mcp`
-- `agent_discover_rss`
-- `agent_reactualize_apps_batch`
-- `agent_review_queue_digest`
-- `check_app_links_batch`
-- `ingest_mcp_registry`
-- `newsletter_draft`
-- `rebuild_sitemap`
-- `refresh_search_vectors_batch`
 
 ---
 
 ## Включение background-задач
 
-По умолчанию `AGENT_SOURCES_ENABLED=` и `AGENT_REACTUALIZATION_ENABLED=False` —
-никакая агент-задача не делает реальных LLM-вызовов до того как оператор
-явно включит её. Это намеренно: первый раз запускать на проде хочется в
-наблюдаемом режиме, а не "сам запустился по cron'у в 6:30 утра".
+По умолчанию discovery + re-actualization выключены — намеренно. Первый
+запуск делается dry-run'ом, не «по cron'у в 6:30 утра».
 
-### Шаг 1. Прогнать discovery dry-run вручную
+### Discovery
 
 ```bash
+# Dry-run, ~$0.01-0.02
 docker compose exec web python manage.py agent_run --source=github_mcp --limit=5
-# Это dry-run по умолчанию — пройдёт через LLM, напишет audit-rows
-# в AgentRun / EnrichmentTask / LLMCallLog, но НЕ создаст App.
-```
 
-Стоимость: ~$0.01-0.02 на 5 кандидатов.
-
-### Шаг 2. Если результат осмысленный — включить discovery beat
-
-```bash
-# В .env:
-AGENT_SOURCES_ENABLED=github_mcp,rss
-```
-
-```bash
+# Результат осмысленный → включить
+echo 'AGENT_SOURCES_ENABLED=github_mcp,rss' >> .env
 docker compose restart worker beat
 ```
 
-После этого:
-- `discover_github_mcp` запускается Пн/Ср/Пт в 06:30 UTC
-- `discover_rss` каждые 6 часов
+Beat: `discover_github_mcp` Пн/Ср/Пт 06:30 UTC, `discover_rss` каждые 6 ч.
 
-### Шаг 3. Прогнать re-actualization dry-run
+### Re-actualization
 
 ```bash
 docker compose exec web python manage.py shell -c \
-  "from apps.agent.tasks import reactualize_apps_batch;
-   print(reactualize_apps_batch(limit=3, dry_run=True))"
-```
+  "from apps.agent.tasks import reactualize_apps_batch; print(reactualize_apps_batch(limit=3, dry_run=True))"
 
-### Шаг 4. Включить re-actualization beat
-
-```bash
-# В .env:
-AGENT_REACTUALIZATION_ENABLED=True
-```
-
-```bash
+echo 'AGENT_REACTUALIZATION_ENABLED=True' >> .env
 docker compose restart worker beat
 ```
 
-После этого `reactualize_apps_batch` запускается ежедневно в 07:00 UTC.
+Beat: `reactualize_apps_batch` ежедневно 07:00 UTC.
 
-### Шаг 5. Проверить budget alerts
+### Sanity-проверка budget alert
 
-Один раз форсировать алерт чтобы убедиться что email уходит:
+Один раз форсировать чтобы убедиться что email уходит:
 
 ```bash
-# Поднять бюджет до тестового низкого значения
+# Поднять low-budget на минуту
 AGENT_MONTHLY_BUDGET_USD=0.10 docker compose restart worker
 docker compose exec web python manage.py shell -c \
   "from apps.agent.tasks import agent_budget_check; print(agent_budget_check())"
-# Должен прислать письмо что превышен 100% порог.
-# Не забыть вернуть AGENT_MONTHLY_BUDGET_USD=20 и сбросить latches в админке.
+# Должно прислать письмо «100% reached». Вернуть budget и сбросить
+# latches в /admin/agent/budgetmonthstate/.
 ```
 
 ---
 
 ## Операции дня 2
 
-### Просмотр логов
-
+### Логи
 ```bash
-docker compose logs -f web --tail=100         # gunicorn + Django
-docker compose logs -f worker --tail=100      # Celery worker (LLM, link checks)
-docker compose logs -f beat --tail=100        # beat scheduler
+docker compose logs -f web --tail=100
+docker compose logs -f worker --tail=100
+docker compose logs -f beat --tail=100
+docker compose --profile production logs -f pg_backup --tail=20
 ```
 
-### Проверка стоимости / лимитов
+### Cost / budget
+* `/admin/agent/agentrun/cost-dashboard/` — текущий month spend, per-day, per-model, top-10 expensive runs.
+* `/admin/agent/budgetmonthstate/` — latches. Сбросить вручную = очистить таймштамп + save.
 
-Открыть `/admin/agent/agentrun/cost-dashboard/` — там:
-- сумма за текущий месяц + бюджет + утилизация %
-- per-day breakdown за 30 дней
-- per-model + per-source разбивка
-- Top 10 самых дорогих AgentRun'ов
+### Editorial queue
+* `/admin/agent/needsreviewqueueentry/` — что LLM предложил, но не применил.
+  Kind'ы: `enriched`, `reactualized`, `vanished`. Действия inline:
+  Apply verdict / Approve & publish / Reject / Mark resolved.
+* `/admin/agent/needsreviewqueueentry/sla-dashboard/` — overdue snapshot.
 
-### Проверка статуса latches бюджета
-
-`/admin/agent/budgetmonthstate/` — одна строка на месяц. Поля
-`discovery_disabled_at` и `hard_stop_at` показывают когда сработали
-ограничения (если сработали). Сбросить вручную = очистить таймштампы
-+ сохранить запись.
-
-### Очередь редактора
-
-`/admin/agent/needsreviewqueueentry/` — что LLM предложил, но не
-применил автоматически. Три категории:
-- `enriched` — обогащение существующего DRAFT
-- `reactualized` — diff при re-actualization
-- `vanished` — линк сдох на 7 проверках подряд
-
-Действия редактора прямо из админки: Apply verdict / Approve & publish /
-Reject / Mark resolved.
+### UseCase dedup
+Когда synonyms накапливаются (`/admin/catalog/usecase/` отсортировать по
+app_count) — admin action «Merge selected use-cases into one canonical
+row».
 
 ### Apply изменений кода
-
 ```bash
-cd /opt/llmmarket
-git pull
-docker compose build web worker beat
-docker compose up -d web worker beat
-# Миграции применятся автоматически entrypoint'ом.
+cd /opt/llmmarket && git pull
+docker compose --profile production up -d --build
+# Миграции прогонит entrypoint.
 ```
 
-### Бэкап БД
-
+### Restore из backup
 ```bash
-# Если postgres внутри docker-compose:
-docker compose exec postgres pg_dump -U llmmarket llmmarket > backup-$(date +%F).sql
-
-# Если RDS — снапшоты делать через AWS Console или automated daily snapshots.
+docker compose --profile production exec pg_backup ls /backups/
+docker compose --profile production exec pg_backup \
+  gunzip -c /backups/llmmarket-…sql.gz | \
+  docker compose exec -T postgres psql -U llmmarket llmmarket
 ```
 
 ---
 
 ## Rollback
 
-Деплой не накатывает destructive миграций по умолчанию — Phase 1-5
-миграции аддитивные (новые таблицы / поля / индексы). Откатить можно
-просто переключив код:
+Миграции Sprint 1-3 аддитивные (новые таблицы / поля / индексы), кроме
+`catalog.0002` (CharField 200→500 — обратно-совместимый расширение).
+Откат = переключить код:
 
 ```bash
 cd /opt/llmmarket
-git log --oneline -10                              # найти commit до проблемного
+git log --oneline -10
 git checkout <good-commit-sha>
-docker compose build web worker beat
-docker compose up -d web worker beat
+docker compose --profile production up -d --build
 ```
 
-Если миграция новой версии добавила nullable-поле, старая версия кода
-просто его проигнорирует. Если новая миграция добавила NOT NULL —
-сделать reverse-migration сначала:
-
+Если future-миграция добавит NOT NULL / drop column — reverse её сначала:
 ```bash
-docker compose exec web python manage.py migrate <app> <previous-migration-name>
+docker compose exec web python manage.py migrate <app> <previous-name>
 ```
 
-**Не отказываться от автоматических снапшотов БД** — single source of
-recovery если что-то поломалось.
+Последняя линия защиты — `pg_backup` дампы. Не отказываться от
+automated S3 upload.
 
 ---
 
 ## Известные особенности
 
-### npm 403 на link checker
+### MCP Registry 404
+`https://registry.modelcontextprotocol.io/v1/servers` лежит с
+2026-05-15. Sprint 2 добавил Sentry-counter c stable fingerprint —
+все 404 коалесцируются в одну Sentry-issue. Sprint 3 GitHub-MCP
+discovery — основной активный источник. **Action item:** периодически
+смотреть Sentry на эту issue + проверять новый URL.
 
-`https://www.npmjs.com/package/...` отвечает 403 на HEAD-запросы от
-автоматов. Link checker засчитывает это как fail, но 5 фейлов
-недостаточно для auto-deprecate (threshold = 7). В админке
-LinkHealth → consecutive_failures=1 — не баг, ничего делать не надо.
+### F4 broker auto-fallback
+`manage.py agent_run` из host-venv (вне контейнера) не резолвит имя
+`redis` → автоматически переключается в `CELERY_TASK_ALWAYS_EAGER=True`
++ stderr warning. В контейнере (где Redis доступен) fallback не
+срабатывает.
 
-### MCP Registry URL drift
-
-На момент написания (2026-05-16) `https://registry.modelcontextprotocol.io/v1/servers`
-отвечает 404 — внешний registry, видимо, изменил endpoint. Задача
-`ingest_mcp_registry` обрабатывает это gracefully (zero counters, no
-crash), но новые записи через MCP Registry не приходят. Phase 3
-discovery (`github_mcp`) — основной активный путь, в нём всё работает.
-
-**Action item** для оператора: периодически проверять актуальный URL
-MCP Registry и обновлять `MCP_REGISTRY_BASE_URL` если изменился.
+### Phase 4 reactualize: use_case noise
+LLM каждый прогон формулирует use-case titles чуть иначе. Diff
+не зажигает queue entry на use-case-only drift — иначе редактор
+получал бы spam на каждой re-actualization. Если drift'ает что-то
+ещё — use_case delta всё равно входит в payload и видна в админке.
 
 ### Cached input cost
-
-OpenAI бьёт cached input по ~10% от standard input rate. Pipeline
-учитывает это в `_estimate_cost_usd`: `(input - cached) × normal +
-cached × cached_price + output × output_price`. Если в будущем
-OpenAI изменит ratio или порог cache TTL — обновить
-`AGENT_OPENAI_*_CACHED_COST_PER_1M_TOKENS` соответственно и прогнать
+OpenAI бьёт cached input ~10% от standard. `_estimate_cost_usd`
+учитывает это; при изменении ratio со стороны OpenAI обновить
+`AGENT_OPENAI_*_CACHED_COST_PER_1M_TOKENS` + прогнать
 `agent_backfill_costs --include-nonzero` для re-pricing исторических
 строк.
 
-### F4 broker auto-fallback
+### Static — WhiteNoise vs nginx
+Sprint 2 добавил WhiteNoise — gunicorn сам отдаёт `/static/*` с
+правильными cache-busting хэшами. nginx-блок в этом документе — на
+случай если используется без Cloudflare proxy для TLS. Если уже
+есть Cloudflare → nginx не нужен.
 
-При запуске `manage.py agent_run` из host-venv (не из контейнера)
-обнаружится что Redis по имени `redis` не резолвится — pipeline
-автоматически переключится в `CELERY_TASK_ALWAYS_EAGER=True` и
-выпишет warning в stderr. Это поведение для удобства dev'а; в проде
-контейнер всегда видит broker, fallback не срабатывает.
+### CSP в браузере
+Sprint 3 включил Content-Security-Policy в prod-настройках. Allowlist
+покрывает Cloudflare Turnstile + Tailwind CDN + unpkg (htmx/Alpine) +
+Google Fonts. Если добавляешь новый CDN-asset — пропиши в
+`apps/core/csp.py` иначе браузер заблокирует. Inline-`<script>` —
+только с `{{ request.csp_nonce }}`.
 
-### Phase 4 reactualize: use_case noise
-
-LLM каждый прогон формулирует use-case заголовки немного иначе
-("Connect to Slack" vs "Connect Slack"). `compute_reactualization` не
-зажигает queue entry на use-case-only diff — иначе редактор бы получал
-"use cases changed" сообщение на каждое приложение в каждом цикле.
-Дельта use_cases всё равно записывается в diff payload и видна в
-queue entry когда срабатывает на что-то ещё (поля / capability /
-verdict).
+### og-default.png placeholder
+Sprint 3 smoke-test сгенерировал placeholder PNG, чтобы
+`ManifestStaticFilesStorage` не падал на отсутствующем файле. Для
+launch'а — заменить на дизайнерский asset (см.
+`docs/pre-launch-checklist.md` § 0.6).
