@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
+from itertools import islice
 
 from celery import shared_task
 from django.conf import settings
@@ -62,6 +63,8 @@ from apps.agent.pipeline.reactualize import (
     ReactualizationDiff,
     compute_reactualization,
 )
+from apps.agent.sources.claude_connectors import ClaudeConnectorsSource
+from apps.agent.sources.gemini_extensions import GeminiExtensionsSource
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
     candidate_to_minimal_draft,
@@ -76,6 +79,8 @@ logger = logging.getLogger(__name__)
 SOURCE_FLAG_ENRICH_PENDING = "enrich_pending"
 SOURCE_FLAG_RSS = "rss"
 SOURCE_FLAG_GITHUB_MCP = "github_mcp"
+SOURCE_FLAG_GEMINI_EXTENSIONS = "gemini_extensions"
+SOURCE_FLAG_CLAUDE_CONNECTORS = "claude_connectors"
 
 
 def _fetcher_for_url(url: str) -> "Callable[[str], FetchResult]":
@@ -554,6 +559,66 @@ def _run_discovery_batch(
         raise
 
 
+def run_direct_ingest_batch(
+    *,
+    source_flag: str,
+    source_label: str,
+    drafts,
+    dry_run: bool,
+    limit: int | None = None,
+    enforce_flag: bool = True,
+    trigger: str = AgentRun.Trigger.BEAT,
+) -> dict:
+    """Persist normalized AppDrafts from a non-LLM source.
+
+    Direct ingest sources already produce trusted-enough normalized drafts;
+    they do not pass through cheap classification or enrichment, so this
+    helper records batch audit stats but does not create LLMCallLog rows.
+    """
+    if not dry_run and enforce_flag and not _source_enabled(source_flag):
+        return {"skipped": "source_disabled", "source": source_flag}
+
+    run = AgentRun.objects.create(
+        source_type=source_label,
+        status=AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.RUNNING,
+        trigger=trigger,
+    )
+    counters = {"seen": 0, "new": 0, "updated": 0, "skipped": 0, "failed": 0}
+    iterable = islice(drafts, limit) if limit is not None else drafts
+    try:
+        for draft in iterable:
+            counters["seen"] += 1
+            if dry_run:
+                continue
+            try:
+                outcome = upsert_app_from_draft(draft, source_label)
+            except Exception:
+                counters["failed"] += 1
+                logger.exception(
+                    "agent_direct_ingest_upsert_failed",
+                    extra={
+                        "source": source_label,
+                        "external_id": getattr(draft, "external_id", ""),
+                        "draft_name": getattr(draft, "name", ""),
+                    },
+                )
+                continue
+            counters[outcome] += 1
+
+        run.status = AgentRun.Status.DRY_RUN if dry_run else AgentRun.Status.SUCCEEDED
+        run.stats = counters
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "stats", "finished_at"])
+        return counters
+    except Exception as exc:
+        logger.exception("agent_direct_ingest_batch_failed", extra={"run_id": run.pk})
+        run.status = AgentRun.Status.FAILED
+        run.error = str(exc)[:2000]
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "error", "finished_at"])
+        raise
+
+
 @shared_task
 def discover_rss(limit: int = 20, *, dry_run: bool = False) -> dict:
     """Phase 3 RSS discovery.
@@ -588,6 +653,48 @@ def discover_github_mcp(limit: int = 20, *, dry_run: bool = False) -> dict:
         dry_run=dry_run,
         enrich_relevant=True,
         fetcher=lambda url: fetch_github_readme_text(url, token=github_token),
+    )
+
+
+@shared_task
+def ingest_gemini_extensions(
+    limit: int | None = None,
+    *,
+    dry_run: bool = False,
+    enforce_flag: bool = True,
+    trigger: str = AgentRun.Trigger.BEAT,
+) -> dict:
+    """Direct-ingest Gemini CLI extensions from Google's public JSON feed."""
+    source = GeminiExtensionsSource()
+    return run_direct_ingest_batch(
+        source_flag=SOURCE_FLAG_GEMINI_EXTENSIONS,
+        source_label=Source.SourceType.GEMINI_EXTENSIONS,
+        drafts=source.iter_drafts(),
+        dry_run=dry_run,
+        limit=limit,
+        enforce_flag=enforce_flag,
+        trigger=trigger,
+    )
+
+
+@shared_task
+def ingest_claude_connectors(
+    limit: int | None = None,
+    *,
+    dry_run: bool = False,
+    enforce_flag: bool = True,
+    trigger: str = AgentRun.Trigger.BEAT,
+) -> dict:
+    """Direct-ingest public Claude Connectors pages."""
+    source = ClaudeConnectorsSource()
+    return run_direct_ingest_batch(
+        source_flag=SOURCE_FLAG_CLAUDE_CONNECTORS,
+        source_label=Source.SourceType.CLAUDE_CONNECTORS,
+        drafts=source.iter_drafts(),
+        dry_run=dry_run,
+        limit=limit,
+        enforce_flag=enforce_flag,
+        trigger=trigger,
     )
 
 

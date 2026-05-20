@@ -211,7 +211,6 @@ SENTRY_DSN=your-sentry-dsn
 
 ## 📚 Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) - Technical architecture
 - [`docs/business.md`](docs/business.md) - Business requirements & strategy
 
 ## 🤝 Contributing

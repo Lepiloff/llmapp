@@ -11,6 +11,7 @@
   {"model": "catalog.listingtype", "pk": 4, "fields": {"name": "MCP Server", "slug": "mcp-server", "sort_order": 40, "description": "Public Model Context Protocol server."}},
   {"model": "catalog.listingtype", "pk": 5, "fields": {"name": "Gemini App", "slug": "gemini-app", "sort_order": 50, "description": "App or service Gemini can use with the user's permission."}},
   {"model": "catalog.listingtype", "pk": 6, "fields": {"name": "Enterprise Agent", "slug": "enterprise-agent", "sort_order": 60, "description": "Pre-built agent from an enterprise marketplace."}},
+  {"model": "catalog.listingtype", "pk": 7, "fields": {"name": "Gemini Extension", "slug": "gemini-extension", "sort_order": 70, "description": "Developer extension for Gemini CLI."}},
 
   {"model": "catalog.category", "pk": 1, "fields": {"name": "Productivity & Task Management", "slug": "productivity", "sort_order": 10}},
   {"model": "catalog.category", "pk": 2, "fields": {"name": "Developer Tools", "slug": "developer-tools", "sort_order": 20}},
@@ -30,5 +31,10 @@
   {"model": "catalog.capability", "pk": 5, "fields": {"key": "local_setup_required", "label": "Requires local setup", "sort_order": 50, "description": "Requires local installation on the user's machine."}},
   {"model": "catalog.capability", "pk": 6, "fields": {"key": "remote_available", "label": "Hosted / remote available", "sort_order": 60, "description": "A hosted / remote endpoint is provided."}},
   {"model": "catalog.capability", "pk": 7, "fields": {"key": "open_source", "label": "Open source", "sort_order": 70, "description": "Source code is publicly available."}},
-  {"model": "catalog.capability", "pk": 8, "fields": {"key": "api_available", "label": "Standalone API", "sort_order": 80, "description": "Has a separate, standalone API."}}
+  {"model": "catalog.capability", "pk": 8, "fields": {"key": "api_available", "label": "Standalone API", "sort_order": 80, "description": "Has a separate, standalone API."}},
+  {"model": "catalog.capability", "pk": 9, "fields": {"key": "gemini_has_mcp", "label": "Gemini MCP integration", "sort_order": 90, "description": "Gemini extension manifest declares MCP support."}},
+  {"model": "catalog.capability", "pk": 10, "fields": {"key": "gemini_has_context", "label": "Gemini context support", "sort_order": 100, "description": "Gemini extension manifest declares context support."}},
+  {"model": "catalog.capability", "pk": 11, "fields": {"key": "gemini_has_hooks", "label": "Gemini hooks", "sort_order": 110, "description": "Gemini extension manifest declares hooks."}},
+  {"model": "catalog.capability", "pk": 12, "fields": {"key": "gemini_has_skills", "label": "Gemini skills", "sort_order": 120, "description": "Gemini extension manifest declares skills."}},
+  {"model": "catalog.capability", "pk": 13, "fields": {"key": "gemini_has_custom_commands", "label": "Gemini custom commands", "sort_order": 130, "description": "Gemini extension manifest declares custom commands."}}
 ]

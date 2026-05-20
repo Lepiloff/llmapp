@@ -278,6 +278,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.discover_github_mcp",
         "schedule": crontab(day_of_week="mon,wed,fri", hour=6, minute=30),
     },
+    "ingest_gemini_extensions": {
+        "task": "apps.agent.tasks.ingest_gemini_extensions",
+        "schedule": crontab(hour=4, minute=30),
+    },
+    "ingest_claude_connectors": {
+        "task": "apps.agent.tasks.ingest_claude_connectors",
+        "schedule": crontab(day_of_week="tue", hour=4, minute=45),
+    },
     "agent_reactualize_apps_batch": {
         "task": "apps.agent.tasks.reactualize_apps_batch",
         "schedule": crontab(hour=7, minute=0),
@@ -305,7 +313,13 @@ CELERY_BEAT_SCHEDULE = {
 # Source / ingest
 # ---------------------------------------------------------------------------
 MCP_REGISTRY_BASE_URL = config(
-    "MCP_REGISTRY_BASE_URL", default="https://registry.modelcontextprotocol.io/v1"
+    "MCP_REGISTRY_BASE_URL", default="https://registry.modelcontextprotocol.io/v0"
+)
+GEMINI_EXTENSIONS_URL = config(
+    "GEMINI_EXTENSIONS_URL", default="https://geminicli.com/extensions.json"
+)
+CLAUDE_CONNECTORS_BASE_URL = config(
+    "CLAUDE_CONNECTORS_BASE_URL", default="https://claude.com/connectors"
 )
 
 # ---------------------------------------------------------------------------

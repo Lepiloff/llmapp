@@ -9,12 +9,13 @@
 
 ## 1. Что это
 
-**LLM App Market** — публичный каталог приложений на базе больших
-языковых моделей: GPT-Apps, Claude Connectors, MCP Servers, Gemini
-Apps и enterprise-агенты. Сайт работает как "Product Hunt + App Store
-для LLM-экосистемы": посетитель ищет, что подключить к своему ChatGPT
-или Claude, и попадает на структурированную карточку с описанием,
-ссылками, отзывами капабилити и кросс-ссылками на похожее.
+**LLM App Market** — cross-platform discovery layer для MCP servers,
+Claude Connectors и Gemini Extensions, с местом под ChatGPT Apps и
+enterprise-агенты. Сайт работает как "Product Hunt + App Store для
+LLM-экосистемы": посетитель ищет, что подключить к своему ChatGPT,
+Claude, Gemini CLI или MCP-compatible client, и попадает на
+структурированную карточку с описанием, ссылками, capability evidence
+и кросс-ссылками на похожее.
 
 Главная страница: `https://llmappmarket.com`.
 
@@ -43,16 +44,17 @@ Apps и enterprise-агенты. Сайт работает как "Product Hunt 
 
 ---
 
-## 3. Текущее состояние (на 2026-05-16)
+## 3. Текущее состояние (на 2026-05-20)
 
 | Метрика | Значение |
 |---|---|
-| Опубликованных приложений | 24 |
+| Опубликованных приложений | 24 baseline; локально после имитации approve видны также pilot-карточки Gemini/Claude |
 | Платформ | 5 (ChatGPT, Claude, Gemini, MCP, Enterprise) |
 | Категорий | 10 (Productivity, Developer Tools, …) |
 | LLM-стоимость текущего месяца | $0.20 (бюджет $20) |
 | Per-published-app LLM cost | $0.006 (на каталог из 24 приложений) |
-| Готовность к проду | ✅ зелёный свет (см. `docs/deployment-ru.md`) |
+| Direct-ingest источники | MCP Registry v0, Gemini Extensions JSON, Claude Connectors HTML crawl |
+| Готовность к проду | ✅ кодовый baseline готов; production rollout блокируется non-code чеклистом |
 
 ---
 
@@ -164,9 +166,9 @@ end-to-end. Цель — в идеале редактор только нажи�
 > no crash). Phase 3 (GitHub MCP search) — основной активный
 > источник новых карточек.
 
-### Phase 3 — Discovery (RSS + GitHub MCP search)
+### Phase 3 — Discovery (RSS + GitHub MCP search + direct ingest)
 
-Два независимых источника, оба гоняются по расписанию в beat:
+Пять источников, часть LLM-driven, часть direct ingest:
 
 **RSS** (`discover_rss`, каждые 6 часов):
 - Парсит RSS/Atom-ленты блогов: Anthropic, OpenAI, Google AI, плюс
@@ -180,6 +182,18 @@ end-to-end. Цель — в идеале редактор только нажи�
 - Использует GitHub Search API по topic'у `mcp-server`
 - Для каждого репо — `Contents API` для README через base64
 - Дальше тот же путь через cheap LLM для классификации
+
+**Gemini Extensions** (`ingest_gemini_extensions`, daily 04:30 UTC):
+- Тянет официальный JSON feed `geminicli.com/extensions.json`
+- Мапит manifest-поля в `AppDraft`, `gemini-extension`, capability
+  evidence и platform metadata
+- Не вызывает LLM, новые записи остаются DRAFT до редактора
+
+**Claude Connectors** (`ingest_claude_connectors`, Tuesday 04:45 UTC):
+- Проверяет `robots.txt`, затем консервативно парсит публичный
+  `claude.com/connectors`
+- Мапит карточки в `claude-connector`, use-case tags и directory URL
+- Не вызывает LLM, публикация только через editorial approve
 
 **Что важно про cheap LLM:** на этом этапе вызовы дешёвые (~$0.0001
 на кандидата), отсев большой (типично 30-60% кандидатов отклоняется

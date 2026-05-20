@@ -5,14 +5,14 @@
 задачи которые остались. Структурирован по фазам: фаза N разблокирует
 фазу N+1. Каждый пункт можно закрывать независимо.
 
-## Status — 2026-05-18
+## Status — 2026-05-20
 
 | Фаза | Статус |
 |---|---|
 | 0 — Pre-flight (legal, домен, инфра) | 🔴 не начато |
 | 1 — Soft launch (catalog видим, discovery off) | блокируется фазой 0 |
-| 2 — Discovery on (LLM-pipeline активен) | блокируется фазой 1 |
-| 3 — Growth (B3, контент, monetization) | блокируется фазой 2 |
+| 2 — Discovery on (LLM-pipeline активен) | блокируется фазой 1; Sprint 4 direct-ingest MVP готов |
+| 3 — Growth (контент, monetization, ChatGPT Apps) | блокируется фазой 2 |
 
 ---
 
@@ -129,9 +129,14 @@ behavior в продакшен-окружении на готовых 24 кар�
 - [ ] Проверить `/admin/agent/needsreviewqueueentry/` — кандидаты выглядят осмысленно.
 
 ### 2.2 Включить discovery
-- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss` в env.
+- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss,gemini_extensions,claude_connectors` в env.
 - [ ] `docker compose restart worker beat`.
-- [ ] Beat schedule: discovery_github_mcp Пн/Ср/Пт 06:30 UTC, discover_rss каждые 6 часов.
+- [ ] Beat schedule:
+  - `discover_github_mcp` Пн/Ср/Пт 06:30 UTC
+  - `discover_rss` каждые 6 часов
+  - `ingest_gemini_extensions` daily 04:30 UTC
+  - `ingest_claude_connectors` Tuesday 04:45 UTC
+- [ ] Before production beat: Phase A pilot уже пройден локально; повторить на prod/staging через `agent_run --source=gemini_extensions --limit=30 --apply` и `agent_run --source=claude_connectors --limit=5 --apply`.
 
 ### 2.3 Editorial-cadence
 - [ ] Первый rotated digest пришёл editor'у (07:30 UTC). Если очередь >0 — editor'нул хотя бы 3 entries чтобы померить acceptance rate.
@@ -147,14 +152,11 @@ behavior в продакшен-окружении на готовых 24 кар�
 
 Открываем второй фронт — official directories, контент, monetization.
 
-### 3.1 B3 — Official directories (юридически блокирующее)
-- [ ] **ToS review письмо отправлено legal-owner'у** для:
-  - ChatGPT App Directory
-  - Claude Connectors index
-  - Gemini Apps directory
-- [ ] Legal зелёный свет получен (или конкретный feedback что нельзя).
-- [ ] Если ОК — engineering работа: `apps/agent/sources/chatgpt_directory.py` и т.д. (см. `docs/agent-pipeline.md` Phase 4). 1-2 дня кода + тесты.
-- [ ] Robots.txt enforcement добавлен (Hard constraint #8b из `agent-pipeline.md`).
+### 3.1 B3 — Official directories / ChatGPT Apps
+- [x] Gemini Extensions direct-ingest реализован через официальный JSON feed.
+- [x] Claude Connectors direct-ingest реализован с robots.txt enforcement и conservative HTML crawl.
+- [ ] Production rollout: включить Gemini/Claude flags только после pilot review в админке.
+- [ ] ChatGPT App Directory остаётся отдельным Sprint 5: headless-route технически выполним, но нужен отдельный ToS/Cloudflare review и Playwright-based source.
 
 ### 3.2 F1 — Anthropic provider
 - [ ] Решение по timeline (memory note: primary = Claude Sonnet 4.7, cheap = gpt-5-mini, не использовать Haiku).

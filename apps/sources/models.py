@@ -29,6 +29,7 @@ class Source(models.Model):
         AGENT_ENRICH = "agent_enrich", "Agent enrichment"
         RSS_DISCOVERY = "rss_discovery", "RSS discovery"
         GITHUB_MCP = "github_mcp", "GitHub MCP search"
+        GEMINI_EXTENSIONS = "gemini_extensions", "Gemini Extensions"
 
     app = models.ForeignKey(
         "catalog.App", on_delete=models.CASCADE, related_name="sources"

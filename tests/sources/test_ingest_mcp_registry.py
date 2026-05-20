@@ -67,7 +67,7 @@ def _make_draft(
         external_id=external_id,
         raw_payload={"id": external_id, "name": name},
         official_directory_url=(
-            f"https://registry.modelcontextprotocol.io/v1/servers/{external_id}"
+            f"https://registry.modelcontextprotocol.io/v0/servers/{external_id}"
         ),
         platform_metadata={"protocol_version": "2025-03-26", "transport": "stdio"},
     )

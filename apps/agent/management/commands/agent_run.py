@@ -8,9 +8,8 @@ Supported modes:
   invariant — see ``apps.agent.persist.assert_app_is_eligible``).
 * ``--enrich-pending [--limit N]`` — walk the same selector beat
   would: DRAFT cards not yet agent-enriched, newest first.
-* ``--source=rss|github_mcp [--limit N]`` — run Phase 3 discovery
-  manually. Dry-run bypasses `AGENT_SOURCES_ENABLED`; `--apply` uses the
-  same feature-flag guard as beat.
+* ``--source=rss|github_mcp|gemini_extensions|claude_connectors|mcp_registry
+  [--limit N]`` — run discovery/direct-ingest sources manually.
 
 Default is **dry-run**: the pipeline runs end-to-end (prompt → LLM →
 validate → merge) and writes the audit trail —
@@ -34,10 +33,17 @@ import json
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.agent.management._broker_probe import ensure_eager_if_broker_unreachable
-from apps.agent.models import EnrichmentTask
+from apps.agent.models import AgentRun, EnrichmentTask
 from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
-from apps.agent.tasks import discover_github_mcp, discover_rss, run_enrich_existing_draft
+from apps.agent.tasks import (
+    discover_github_mcp,
+    discover_rss,
+    ingest_claude_connectors,
+    ingest_gemini_extensions,
+    run_enrich_existing_draft,
+)
 from apps.catalog.models import App
+from apps.sources.tasks import ingest_mcp_registry
 
 
 class Command(BaseCommand):
@@ -62,8 +68,14 @@ class Command(BaseCommand):
         )
         target.add_argument(
             "--source",
-            choices=("rss", "github_mcp"),
-            help="Run a Phase 3 discovery source manually.",
+            choices=(
+                "rss",
+                "github_mcp",
+                "gemini_extensions",
+                "claude_connectors",
+                "mcp_registry",
+            ),
+            help="Run a discovery or direct-ingest source manually.",
         )
         parser.add_argument(
             "--limit",
@@ -176,4 +188,22 @@ class Command(BaseCommand):
             return discover_rss(limit=limit, dry_run=dry_run)
         if source == "github_mcp":
             return discover_github_mcp(limit=limit, dry_run=dry_run)
+        if source == "gemini_extensions":
+            return ingest_gemini_extensions(
+                limit=limit,
+                dry_run=dry_run,
+                enforce_flag=False,
+                trigger=AgentRun.Trigger.MANUAL,
+            )
+        if source == "claude_connectors":
+            return ingest_claude_connectors(
+                limit=limit,
+                dry_run=dry_run,
+                enforce_flag=False,
+                trigger=AgentRun.Trigger.MANUAL,
+            )
+        if source == "mcp_registry":
+            if dry_run:
+                return {"skipped": "mcp_registry_has_no_dry_run", "source": source}
+            return ingest_mcp_registry()
         raise CommandError(f"Unsupported source={source!r}")

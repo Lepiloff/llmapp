@@ -177,3 +177,42 @@ def test_source_github_apply_invokes_discovery_task(monkeypatch) -> None:
     assert called == {"limit": 1, "dry_run": False}
     assert "[APPLIED] source=github_mcp" in out.getvalue()
     assert '"persisted": 1' in out.getvalue()
+
+
+def test_source_gemini_apply_invokes_direct_ingest_with_flag_bypass(monkeypatch) -> None:
+    from apps.agent.management.commands import agent_run
+
+    called = {}
+
+    def fake_ingest_gemini_extensions(
+        *,
+        limit: int,
+        dry_run: bool,
+        enforce_flag: bool,
+        trigger: str,
+    ):
+        called["limit"] = limit
+        called["dry_run"] = dry_run
+        called["enforce_flag"] = enforce_flag
+        called["trigger"] = trigger
+        return {"seen": 1, "new": 1}
+
+    monkeypatch.setattr(agent_run, "ingest_gemini_extensions", fake_ingest_gemini_extensions)
+    out = StringIO()
+
+    call_command(
+        "agent_run",
+        "--source=gemini_extensions",
+        "--limit=1",
+        "--apply",
+        stdout=out,
+    )
+
+    assert called == {
+        "limit": 1,
+        "dry_run": False,
+        "enforce_flag": False,
+        "trigger": "manual",
+    }
+    assert "[APPLIED] source=gemini_extensions" in out.getvalue()
+    assert '"new": 1' in out.getvalue()
