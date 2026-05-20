@@ -8,8 +8,8 @@ Supported modes:
   invariant — see ``apps.agent.persist.assert_app_is_eligible``).
 * ``--enrich-pending [--limit N]`` — walk the same selector beat
   would: DRAFT cards not yet agent-enriched, newest first.
-* ``--source=rss|github_mcp|gemini_extensions|claude_connectors|mcp_registry
-  [--limit N]`` — run discovery/direct-ingest sources manually.
+* ``--source=rss|github_mcp|gemini_extensions|claude_connectors|chatgpt_apps|
+  mcp_registry [--limit N]`` — run discovery/direct-ingest sources manually.
 
 Default is **dry-run**: the pipeline runs end-to-end (prompt → LLM →
 validate → merge) and writes the audit trail —
@@ -38,6 +38,7 @@ from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
 from apps.agent.tasks import (
     discover_github_mcp,
     discover_rss,
+    ingest_chatgpt_apps,
     ingest_claude_connectors,
     ingest_gemini_extensions,
     run_enrich_existing_draft,
@@ -73,6 +74,7 @@ class Command(BaseCommand):
                 "github_mcp",
                 "gemini_extensions",
                 "claude_connectors",
+                "chatgpt_apps",
                 "mcp_registry",
             ),
             help="Run a discovery or direct-ingest source manually.",
@@ -197,6 +199,13 @@ class Command(BaseCommand):
             )
         if source == "claude_connectors":
             return ingest_claude_connectors(
+                limit=limit,
+                dry_run=dry_run,
+                enforce_flag=False,
+                trigger=AgentRun.Trigger.MANUAL,
+            )
+        if source == "chatgpt_apps":
+            return ingest_chatgpt_apps(
                 limit=limit,
                 dry_run=dry_run,
                 enforce_flag=False,

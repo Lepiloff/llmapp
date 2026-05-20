@@ -10,7 +10,7 @@
 ## 1. Что это
 
 **LLM App Market** — cross-platform discovery layer для MCP servers,
-Claude Connectors и Gemini Extensions, с местом под ChatGPT Apps и
+Claude Connectors, Gemini Extensions и ChatGPT Apps, с местом под
 enterprise-агенты. Сайт работает как "Product Hunt + App Store для
 LLM-экосистемы": посетитель ищет, что подключить к своему ChatGPT,
 Claude, Gemini CLI или MCP-compatible client, и попадает на
@@ -53,7 +53,7 @@ Claude, Gemini CLI или MCP-compatible client, и попадает на
 | Категорий | 10 (Productivity, Developer Tools, …) |
 | LLM-стоимость текущего месяца | $0.20 (бюджет $20) |
 | Per-published-app LLM cost | $0.006 (на каталог из 24 приложений) |
-| Direct-ingest источники | MCP Registry v0, Gemini Extensions JSON, Claude Connectors HTML crawl |
+| Direct-ingest источники | MCP Registry v0, Gemini Extensions JSON, Claude Connectors HTML crawl, ChatGPT Apps third-party index |
 | Готовность к проду | ✅ кодовый baseline готов; production rollout блокируется non-code чеклистом |
 
 ---
@@ -194,6 +194,14 @@ end-to-end. Цель — в идеале редактор только нажи�
   `claude.com/connectors`
 - Мапит карточки в `claude-connector`, use-case tags и directory URL
 - Не вызывает LLM, публикация только через editorial approve
+
+**ChatGPT Apps** (`ingest_chatgpt_apps`, Wednesday 04:45 UTC):
+- Парсит сторонний публичный индекс `mcpapp.net/chatgpt-apps`; это не
+  OpenAI official feed, поэтому source row помечается как
+  `chatgpt_unofficial`
+- Берёт detail pages, `chatgpt.com/apps/...` connect URL,
+  capabilities, категории, publisher links
+- Не вызывает LLM, все новые карточки остаются DRAFT до редактора
 
 **Что важно про cheap LLM:** на этом этапе вызовы дешёвые (~$0.0001
 на кандидата), отсев большой (типично 30-60% кандидатов отклоняется
@@ -374,12 +382,11 @@ findings. Из живого списка осталось два пункта:
 `OpenAIProvider`. Memory-нота: предполагалось что primary будет
 Claude Sonnet когда переключим.
 
-**B3 — Official directories scrapers.** ChatGPT App Directory,
-Claude Connectors index, Gemini Apps directory. Заблокировано на
-legal/ToS review. Когда unblock: пишем консервативные scrapers
-(1 RPS/domain, robots.txt, identifying UA, Sentry alerts на сбой),
-beat 3 раза в неделю. **Действие:** маршрутизировать на legal-owner
-для проверки ToS платформ перед написанием кода.
+**B3 — Official directories hardening.** Gemini/Claude прямые источники
+реализованы; ChatGPT MVP использует сторонний индекс, а не официальный
+OpenAI feed. Осталось: legal/ToS review для OpenAI official/partner
+channel, решение нужно ли добавлять Playwright-route, и production
+pilot review перед включением `chatgpt_apps` в beat.
 
 ---
 

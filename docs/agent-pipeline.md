@@ -44,9 +44,9 @@ apps/agent/
 ├── sources/                # discovery sources (новые BaseSource impls)
 │   ├── rss_feeds.py
 │   ├── github_mcp_search.py
-│   ├── chatgpt_directory.py
+│   ├── chatgpt_apps.py
 │   ├── claude_connectors.py
-│   └── gemini_apps.py
+│   └── gemini_extensions.py
 ├── persist.py              # ЕДИНСТВЕННАЯ точка контакта с apps.catalog
 │                           # Содержит build_taxonomy_snapshot(), persist_new_draft(), apply_merge_set()
 ├── rate_limit_redis.py     # Django layer: RedisDomainRateLimiter + build_limiter_from_settings();
@@ -268,7 +268,7 @@ apps/agent/
 
 ### Phase 4 — Official directories + re-actualization
 
-**Цель:** добавить ChatGPT App Directory / Claude Connectors / Gemini Apps + регулярную перепроверку. Это самая рискованная фаза — ToS-чувствительные источники + риск тихого затирания редакторских правок.
+**Цель:** добавить ChatGPT Apps / Claude Connectors / Gemini Extensions + регулярную перепроверку. Самая рискованная часть — source drift, ToS-чувствительность и риск тихого затирания редакторских правок.
 
 **Prerequisites (link-checker, deferred from Phase 0):**
 
@@ -279,15 +279,18 @@ Phase 4 re-actualization строится поверх существующег�
 
 Оба фикса с regression-тестами обязательны до включения `agent_reactualize` в beat-schedule.
 
-**Discovery — официальные директории:**
+**Discovery — директории и сторонние индексы:**
 
 - Перед началом — **юридическая проверка ToS** каждой директории. Если запрещён программный доступ — пропускаем источник или ищем официальный API.
 - Если ToS позволяют:
-  - `apps/agent/sources/chatgpt_directory.py`, `claude_connectors.py`, `gemini_apps.py`.
+  - `apps/agent/sources/chatgpt_apps.py`, `claude_connectors.py`, `gemini_extensions.py`.
   - httpx + BS4 для статического HTML; если JS-rendered — отдельный optional Playwright-сервис в docker-compose, логируем "needs JS" если не доступен.
   - Conservative scraping: 1 RPS на домен, User-Agent identifying, robots.txt обязательно.
   - Failure mode: ошибка скрейпинга → Sentry, не падаем; следующий run попробует снова.
-- Beat: `agent_discover_*` 3 раза в неделю (не ежедневно — чтобы не злить вендоров).
+- ChatGPT MVP использует `mcpapp.net/chatgpt-apps` как third-party
+  crawlable index и пишет `Source.source_type=chatgpt_unofficial`;
+  official OpenAI source остаётся отдельным hardening item.
+- Beat: direct-ingest источники gated через `AGENT_SOURCES_ENABLED`.
 
 **Re-actualization:**
 
@@ -414,7 +417,7 @@ Phase 4 re-actualization строится поверх существующег�
 6. **Re-actualization не делает silent auto-update App-полей**: все diffs → review queue.
 7. **Audit trail**: каждый LLM-вызов в `LLMCallLog`, источник enrichment в `Source.payload`.
 8a. **Rate limiting (per-domain) hard-enforced cross-process** через Redis-backed `RedisDomainRateLimiter` (`apps/agent/rate_limit_redis.py`, Sprint 1 follow-up). Atomic Lua-script держит "next allowed timestamp" на host в Redis, так что `worker --concurrency=2` (или несколько worker-контейнеров) соблюдают единый `AGENT_RATE_LIMIT_RPS_PER_DOMAIN` end-to-end. Pure-Python pipeline-слой (`apps/agent/pipeline/rate_limit.py`) экспонирует `get_default_limiter()` + `set_default_limiter()`; Django bridge (`AgentConfig.ready`) регистрирует Redis-implementation при старте, с soft-fallback на in-memory limiter если Redis недоступен (логируется warning). Подключён к `fetch_url_text`, GitHub Search/Contents API, RSS-fetcher. Дефолт `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0`. Регрессии: `tests/agent/test_rate_limit.py`, `tests/agent/test_rate_limit_redis.py`.
-8b. **Robots.txt enforcement — TBD**: понадобится при работе над B3 (official directories — ChatGPT/Claude/Gemini). Текущие источники (RSS, GitHub API) на robots.txt не опираются (используют публичные API), поэтому проверка ещё не реализована.
+8b. **Robots.txt enforcement**: HTML-crawl источники (`claude_connectors`, `chatgpt_apps`) проверяют robots.txt до обхода. RSS/GitHub API/Gemini JSON на robots.txt не опираются, потому что используют публичные feeds/API endpoints.
 9. **Budget cap**: hard stop при превышении месячного бюджета.
 10. **TaxonomySnapshot — единственный мост таксономии в pipeline**: pipeline-код не импортирует Django.
 
@@ -483,7 +486,7 @@ docker-compose exec web pytest tests/agent/eval/ --eval
 - Phase 1 → включается через manage.py команды, не через beat.
 - После Phase 2 → `AGENT_SOURCES_ENABLED=enrich_pending` (только обогащение существующих).
 - После Phase 3 + production gate (см. выше) → `AGENT_SOURCES_ENABLED=enrich_pending,rss,github_mcp`.
-- После Phase 4 → добавить остальные.
+- После direct-ingest pilot review → добавить `gemini_extensions,claude_connectors,chatgpt_apps`.
 
 ---
 

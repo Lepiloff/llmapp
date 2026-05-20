@@ -31,7 +31,7 @@ editor-overload — не из-за бюджета.
 4. [Источник 1 — MCP Registry URL fix](#источник-1--mcp-registry-url-fix)
 5. [Источник 2 — Gemini Extensions JSON-feed](#источник-2--gemini-extensions-json-feed)
 6. [Источник 3 — Claude Connectors HTML crawler](#источник-3--claude-connectors-html-crawler)
-7. [Источник 4 — ChatGPT Apps (Sprint 5, deferred)](#источник-4--chatgpt-apps-sprint-5-deferred)
+7. [Источник 4 — ChatGPT Apps unofficial index](#источник-4--chatgpt-apps-unofficial-index)
 8. [Cross-cutting changes](#cross-cutting-changes)
 9. [Acceptance criteria](#acceptance-criteria)
 10. [Risks + mitigations](#risks--mitigations)
@@ -54,8 +54,10 @@ editor-overload — не из-за бюджета.
 * **MCP Registry:** не «лежит», а сменил версионирование с `/v1/` на
   `/v0/`. Наш Sentry-counter из Sprint 2 алертит впустую; правится
   одной env-переменной.
-* **ChatGPT Apps:** `robots.txt` разрешает, но Cloudflare bot-fight
-  блочит curl. Headless-route выполним; partner-programme — opt-in.
+* **ChatGPT Apps:** официальный `chatgpt.com/apps` существует, но
+  полноценный JSON/API feed не найден. Для MVP добавлен
+  **неофициальный crawlable index** `mcpapp.net/chatgpt-apps`; OpenAI
+  official/Playwright path остаётся отдельным hardening-вопросом.
 
 Research-артефакты с конкретными цифрами и URL'ами — в
 `agent-rollout-log.md` секция «Research 2026-05-19».
@@ -71,7 +73,7 @@ Research-артефакты с конкретными цифрами и URL'ам
 | MCP | GitHub Search + MCP Registry v0 | 500-1000+ | daily (Registry) + 3×/week (GitHub) |
 | Claude Connectors | claude.com/connectors HTML crawl | ~400 | weekly |
 | Gemini Extensions | geminicli.com/extensions.json | ~1000 | daily |
-| ChatGPT Apps | deferred → Sprint 5 | 0 → 200+ (post-Sprint-5) | TBD |
+| ChatGPT Apps | mcpapp.net/chatgpt-apps third-party crawl | ~250 | weekly/manual pilot |
 | Gems / Enterprise | без источника | 0 | — |
 
 `App.platforms` model и админ-UI уже готовы под все 5 — никаких
@@ -401,34 +403,38 @@ Docker-build CI job (Sprint 3 follow-up) поймает если deps дрейф
 
 ---
 
-## Источник 4 — ChatGPT Apps (Sprint 5, deferred)
+## Источник 4 — ChatGPT Apps unofficial index
 
-**Цена:** 3-5 рабочих дней. **Не делать в Sprint 4.**
+**MVP status на 2026-05-20:** реализован без Playwright.
 
-### Почему deferred
-* Cloudflare bot-fight требует headless browser → новый контейнер
-  Playwright в docker-compose.
-* Editorial throughput от Sprint 4 (1400+ новых DRAFT'ов) уже
-  превышает editor-capacity. Добавлять ещё 200 — преждевременно.
+Источник: `https://mcpapp.net/chatgpt-apps` — сторонний публичный
+каталог, который индексирует ChatGPT Apps и отдаёт SSR HTML/detail
+страницы без логина. `robots.txt` разрешает `User-Agent: *` для этих
+страниц, запрещая только admin/API/import paths.
 
-### Что подготовить заранее (без кода)
-* В `pre-launch-checklist.md` Phase 3 — обновить пункт о ChatGPT
-  Apps: «headless route выполним; делать после editorial-stabilization
-  и оценки cost/card в реальных объёмах от Sprint 4».
-* Заранее зарегистрировать аккаунт в OpenAI Developer Program
-  (`platform.openai.com/apps-manage`) чтобы получать early-access
-  partner-channel updates.
+### Реализация
+* `apps/agent/sources/chatgpt_apps.py` — `ChatGPTAppsSource`.
+* `Source.SourceType.CHATGPT_UNOFFICIAL` — source row честно помечен
+  как third-party discovery, не как OpenAI official feed.
+* `manage.py agent_run --source=chatgpt_apps --limit=N [--apply]`.
+* Beat entry: weekly Wednesday 04:45 UTC, gated через
+  `AGENT_SOURCES_ENABLED=chatgpt_apps`.
+* Mapping:
+  - `platforms=["chatgpt"]`, плюс `claude` если mcpapp card помечает
+    Claude surface.
+  - `listing_types=["chatgpt-app"]`, плюс Claude listing type при
+    multi-surface card.
+  - `official_page_url/install_url` берутся из `chatgpt.com/apps/...`
+    connect link, если он есть.
+  - `raw_payload.source_kind="third_party_chatgpt_apps_index"`.
 
-### Sprint 5 scope (когда будем делать)
-1. `docker/Dockerfile.playwright` — playwright image со встроенным
-   Chromium.
-2. Новый compose-сервис `playwright_runner` под `--profile production`.
-3. `apps/agent/sources/chatgpt_apps.py` — использует Playwright
-   через HTTP-API контейнера (sync request → renders → JSON-extract).
-4. ToS compliance check: подтверждение что Playwright-driven crawl
-   эквивалентен «browser visit» с точки зрения OpenAI ToS
-   (legal-review pass).
-5. ~200-500 cards expected на первый crawl.
+### Ограничения
+* Это не официальный OpenAI feed. Карточки всегда остаются
+  `draft/unreviewed/unknown` до редактора.
+* Soft-duplicate на существующую карточку создаёт дополнительный
+  `Source` row; объединение платформ остаётся editorial decision.
+* OpenAI official/partner channel и Playwright route можно добавить
+  позже как separate source после ToS/legal review.
 
 ---
 
@@ -590,7 +596,7 @@ all three open LLM platforms.»**
 | Phase B scaled (3 источника × 200 cards) | 2 часа прогон | 4-6 часов review |
 | Phase C full ingest + monitoring | beat-driven | distributed по дням |
 | **Sprint 4 dev total** | **~3.5 дня** | **~1 неделя editorial** |
-| ChatGPT Apps (Sprint 5, deferred) | 3-5 дней | TBD |
+| ChatGPT Apps unofficial source | 0.5 дня | sample review |
 
 **Editorial-bottleneck — главная зависимость.** Technical-side
 готов поставить 1400+ DRAFT'ов в течение часов; editor реалистично

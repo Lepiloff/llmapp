@@ -216,3 +216,42 @@ def test_source_gemini_apply_invokes_direct_ingest_with_flag_bypass(monkeypatch)
     }
     assert "[APPLIED] source=gemini_extensions" in out.getvalue()
     assert '"new": 1' in out.getvalue()
+
+
+def test_source_chatgpt_apply_invokes_direct_ingest_with_flag_bypass(monkeypatch) -> None:
+    from apps.agent.management.commands import agent_run
+
+    called = {}
+
+    def fake_ingest_chatgpt_apps(
+        *,
+        limit: int,
+        dry_run: bool,
+        enforce_flag: bool,
+        trigger: str,
+    ):
+        called["limit"] = limit
+        called["dry_run"] = dry_run
+        called["enforce_flag"] = enforce_flag
+        called["trigger"] = trigger
+        return {"seen": 1, "new": 1}
+
+    monkeypatch.setattr(agent_run, "ingest_chatgpt_apps", fake_ingest_chatgpt_apps)
+    out = StringIO()
+
+    call_command(
+        "agent_run",
+        "--source=chatgpt_apps",
+        "--limit=1",
+        "--apply",
+        stdout=out,
+    )
+
+    assert called == {
+        "limit": 1,
+        "dry_run": False,
+        "enforce_flag": False,
+        "trigger": "manual",
+    }
+    assert "[APPLIED] source=chatgpt_apps" in out.getvalue()
+    assert '"new": 1' in out.getvalue()

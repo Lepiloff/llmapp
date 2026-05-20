@@ -11,7 +11,7 @@
 |---|---|
 | 0 — Pre-flight (legal, домен, инфра) | 🔴 не начато |
 | 1 — Soft launch (catalog видим, discovery off) | блокируется фазой 0 |
-| 2 — Discovery on (LLM-pipeline активен) | блокируется фазой 1; Sprint 4 direct-ingest MVP готов |
+| 2 — Discovery on (LLM-pipeline активен) | блокируется фазой 1; Sprint 4/5 direct-ingest MVP готов |
 | 3 — Growth (контент, monetization, ChatGPT Apps) | блокируется фазой 2 |
 
 ---
@@ -129,14 +129,15 @@ behavior в продакшен-окружении на готовых 24 кар�
 - [ ] Проверить `/admin/agent/needsreviewqueueentry/` — кандидаты выглядят осмысленно.
 
 ### 2.2 Включить discovery
-- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss,gemini_extensions,claude_connectors` в env.
+- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss,gemini_extensions,claude_connectors,chatgpt_apps` в env.
 - [ ] `docker compose restart worker beat`.
 - [ ] Beat schedule:
   - `discover_github_mcp` Пн/Ср/Пт 06:30 UTC
   - `discover_rss` каждые 6 часов
   - `ingest_gemini_extensions` daily 04:30 UTC
   - `ingest_claude_connectors` Tuesday 04:45 UTC
-- [ ] Before production beat: Phase A pilot уже пройден локально; повторить на prod/staging через `agent_run --source=gemini_extensions --limit=30 --apply` и `agent_run --source=claude_connectors --limit=5 --apply`.
+  - `ingest_chatgpt_apps` Wednesday 04:45 UTC
+- [ ] Before production beat: Phase A pilot уже пройден локально; повторить на prod/staging через `agent_run --source=gemini_extensions --limit=30 --apply`, `agent_run --source=claude_connectors --limit=5 --apply`, `agent_run --source=chatgpt_apps --limit=10 --apply`.
 
 ### 2.3 Editorial-cadence
 - [ ] Первый rotated digest пришёл editor'у (07:30 UTC). Если очередь >0 — editor'нул хотя бы 3 entries чтобы померить acceptance rate.
@@ -155,8 +156,9 @@ behavior в продакшен-окружении на готовых 24 кар�
 ### 3.1 B3 — Official directories / ChatGPT Apps
 - [x] Gemini Extensions direct-ingest реализован через официальный JSON feed.
 - [x] Claude Connectors direct-ingest реализован с robots.txt enforcement и conservative HTML crawl.
-- [ ] Production rollout: включить Gemini/Claude flags только после pilot review в админке.
-- [ ] ChatGPT App Directory остаётся отдельным Sprint 5: headless-route технически выполним, но нужен отдельный ToS/Cloudflare review и Playwright-based source.
+- [x] ChatGPT Apps MVP реализован через сторонний crawlable index `mcpapp.net/chatgpt-apps` без Playwright; source rows помечаются как неофициальные.
+- [ ] Production rollout: включить Gemini/Claude/ChatGPT flags только после pilot review в админке.
+- [ ] OpenAI official ChatGPT App Directory остаётся отдельным hardening item: нужен ToS/partner-channel review перед official-source или Playwright route.
 
 ### 3.2 F1 — Anthropic provider
 - [ ] Решение по timeline (memory note: primary = Claude Sonnet 4.7, cheap = gpt-5-mini, не использовать Haiku).

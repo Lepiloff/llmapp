@@ -25,6 +25,7 @@ class Source(models.Model):
         MCP_REGISTRY = "mcp_registry", "MCP Registry"
         SUBMISSION = "submission", "User submission"
         CHATGPT_DIRECTORY = "chatgpt_directory", "ChatGPT App Directory"
+        CHATGPT_UNOFFICIAL = "chatgpt_unofficial", "ChatGPT unofficial discovery"
         CLAUDE_CONNECTORS = "claude_connectors", "Claude Connectors"
         AGENT_ENRICH = "agent_enrich", "Agent enrichment"
         RSS_DISCOVERY = "rss_discovery", "RSS discovery"

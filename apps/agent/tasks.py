@@ -64,6 +64,7 @@ from apps.agent.pipeline.reactualize import (
     compute_reactualization,
 )
 from apps.agent.sources.claude_connectors import ClaudeConnectorsSource
+from apps.agent.sources.chatgpt_apps import ChatGPTAppsSource
 from apps.agent.sources.gemini_extensions import GeminiExtensionsSource
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
@@ -81,6 +82,7 @@ SOURCE_FLAG_RSS = "rss"
 SOURCE_FLAG_GITHUB_MCP = "github_mcp"
 SOURCE_FLAG_GEMINI_EXTENSIONS = "gemini_extensions"
 SOURCE_FLAG_CLAUDE_CONNECTORS = "claude_connectors"
+SOURCE_FLAG_CHATGPT_APPS = "chatgpt_apps"
 
 
 def _fetcher_for_url(url: str) -> "Callable[[str], FetchResult]":
@@ -690,6 +692,27 @@ def ingest_claude_connectors(
     return run_direct_ingest_batch(
         source_flag=SOURCE_FLAG_CLAUDE_CONNECTORS,
         source_label=Source.SourceType.CLAUDE_CONNECTORS,
+        drafts=source.iter_drafts(),
+        dry_run=dry_run,
+        limit=limit,
+        enforce_flag=enforce_flag,
+        trigger=trigger,
+    )
+
+
+@shared_task
+def ingest_chatgpt_apps(
+    limit: int | None = None,
+    *,
+    dry_run: bool = False,
+    enforce_flag: bool = True,
+    trigger: str = AgentRun.Trigger.BEAT,
+) -> dict:
+    """Direct-ingest ChatGPT Apps from a crawlable third-party index."""
+    source = ChatGPTAppsSource()
+    return run_direct_ingest_batch(
+        source_flag=SOURCE_FLAG_CHATGPT_APPS,
+        source_label=Source.SourceType.CHATGPT_UNOFFICIAL,
         drafts=source.iter_drafts(),
         dry_run=dry_run,
         limit=limit,

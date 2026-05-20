@@ -286,6 +286,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.ingest_claude_connectors",
         "schedule": crontab(day_of_week="tue", hour=4, minute=45),
     },
+    "ingest_chatgpt_apps": {
+        "task": "apps.agent.tasks.ingest_chatgpt_apps",
+        "schedule": crontab(day_of_week="wed", hour=4, minute=45),
+    },
     "agent_reactualize_apps_batch": {
         "task": "apps.agent.tasks.reactualize_apps_batch",
         "schedule": crontab(hour=7, minute=0),
@@ -320,6 +324,9 @@ GEMINI_EXTENSIONS_URL = config(
 )
 CLAUDE_CONNECTORS_BASE_URL = config(
     "CLAUDE_CONNECTORS_BASE_URL", default="https://claude.com/connectors"
+)
+CHATGPT_APPS_INDEX_URL = config(
+    "CHATGPT_APPS_INDEX_URL", default="https://mcpapp.net/chatgpt-apps"
 )
 
 # ---------------------------------------------------------------------------

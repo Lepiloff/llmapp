@@ -683,10 +683,13 @@ quality_score =
 
 ### 13.1. ChatGPT App Directory
 
-- Источник: публичная страница OpenAI ChatGPT App Directory.
-- Метод: ручной curated; редактор заводит карточки.
-- Частота: по мере появления новых публичных приложений.
-- Поле `Source.source_type` = `manual_chatgpt_directory`.
+- Official source: публичная страница OpenAI ChatGPT App Directory
+  (`chatgpt.com/apps`), но без подтверждённого JSON/API feed.
+- MVP source: сторонний crawlable index `mcpapp.net/chatgpt-apps`.
+- Метод: `ChatGPTAppsSource` создаёт DRAFT-карточки, редактор
+  проверяет и публикует вручную.
+- Частота: manual pilot / weekly beat после review.
+- Поле `Source.source_type` = `chatgpt_unofficial`.
 
 ### 13.2. Claude Connectors Directory
 
