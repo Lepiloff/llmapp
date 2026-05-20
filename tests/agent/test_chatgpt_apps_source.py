@@ -101,3 +101,40 @@ def test_source_full_crawl_yields_draft() -> None:
 
     assert len(drafts) == 1
     assert drafts[0].raw_payload["source_kind"] == "third_party_chatgpt_apps_index"
+
+
+def test_source_without_max_pages_follows_pagination_until_last_page() -> None:
+    ca._ROBOTS_CACHE.clear()
+    page_2 = INDEX_HTML.replace(
+        "/app/acme-chat",
+        "/app/beta-chat",
+    ).replace(
+        "Acme Chat",
+        "Beta Chat",
+    ).replace(
+        '<nav aria-label="Pagination"><a href="/chatgpt-apps?page=2">Next</a></nav>',
+        "",
+    )
+    detail_2 = DETAIL_HTML.replace("Acme Chat", "Beta Chat")
+    responses = {
+        "https://mcpapp.net/robots.txt": ROBOTS_ALLOW,
+        "https://mcpapp.net/chatgpt-apps": INDEX_HTML,
+        "https://mcpapp.net/chatgpt-apps?page=2": page_2,
+        "https://mcpapp.net/app/acme-chat": DETAIL_HTML,
+        "https://mcpapp.net/app/beta-chat": detail_2,
+    }
+    fetched = []
+
+    def fetch(url: str) -> str:
+        fetched.append(url)
+        return responses[url]
+
+    source = ChatGPTAppsSource(
+        index_url="https://mcpapp.net/chatgpt-apps",
+        fetch_text=fetch,
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert [draft.name for draft in drafts] == ["Acme Chat", "Beta Chat"]
+    assert "https://mcpapp.net/chatgpt-apps?page=2" in fetched

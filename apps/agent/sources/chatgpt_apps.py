@@ -1,6 +1,7 @@
 """ChatGPT Apps direct-ingest source backed by a crawlable third-party index."""
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import re
@@ -69,7 +70,7 @@ class ChatGPTAppsSource(BaseSource):
         index_url: str | None = None,
         fetch_text: FetchText | None = None,
         timeout: float = 30.0,
-        max_pages: int = 8,
+        max_pages: int | None = None,
     ) -> None:
         self.index_url = (index_url or settings.CHATGPT_APPS_INDEX_URL).rstrip("/")
         self.fetch_text = fetch_text or self._requests_fetch_text
@@ -83,7 +84,12 @@ class ChatGPTAppsSource(BaseSource):
             return
 
         seen_urls: set[str] = set()
-        for page in range(1, self.max_pages + 1):
+        page_numbers = (
+            itertools.count(1)
+            if self.max_pages is None
+            else range(1, self.max_pages + 1)
+        )
+        for page in page_numbers:
             page_url = self._page_url(page)
             try:
                 index_html = self.fetch_text(page_url)
