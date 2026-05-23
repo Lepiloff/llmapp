@@ -1,7 +1,7 @@
 """SEO models for metadata and structured data.
 
 Architecture refs:
-  * docs/architecture.md § 14 (SEO features)
+  * docs/architecture.md § 11 (SEO, newsletter, and link health)
 """
 from __future__ import annotations
 

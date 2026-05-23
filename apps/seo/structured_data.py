@@ -1,7 +1,7 @@
 """Structured data generation for Schema.org JSON-LD.
 
 Architecture refs:
-  * docs/architecture.md § 14.3 (structured data)
+  * docs/architecture.md § 11 (structured data)
 """
 from __future__ import annotations
 

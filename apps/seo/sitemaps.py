@@ -1,7 +1,7 @@
 """Sitemaps for SEO.
 
 Architecture refs:
-  * docs/architecture.md § 14.2 (sitemap generation)
+  * docs/architecture.md § 11 (sitemap generation)
 """
 from __future__ import annotations
 

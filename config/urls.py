@@ -1,8 +1,7 @@
 """Main URL configuration for LLM App Market.
 
 Architecture refs:
-  * docs/architecture.md § 7 (URL patterns)
-  * docs/architecture.md § 8 (API endpoints)
+  * docs/architecture.md § 8 (routing and public API)
 """
 from __future__ import annotations
 

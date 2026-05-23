@@ -1,7 +1,7 @@
 """Analytics models for tracking user behavior.
 
 Architecture refs:
-  * docs/architecture.md § 9 (click tracking)
+  * docs/architecture.md § 8 (outbound redirect/click tracking)
   * docs/business.md § 9 (outbound redirect tracking)
 """
 from __future__ import annotations
