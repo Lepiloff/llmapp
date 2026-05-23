@@ -1874,25 +1874,21 @@ This invariant (every `App` has one `AppCapability` per known `Capability`) lets
 
 ### 9.5. Deduplication
 
-`find_soft_duplicate(draft)` checks:
+`upsert_app_from_draft()` splits duplicate handling into two paths:
 
-```python
-def find_soft_duplicate(draft: AppDraft) -> App | None:
-    # 1. Exact developer_url + fuzzy name
-    if draft.developer_url:
-        for cand in App.objects.filter(developer_url__iexact=draft.developer_url):
-            if Levenshtein.distance(cand.name.lower(), draft.name.lower()) <= 3:
-                return cand
-    # 2. Exact install_url
-    if draft.install_url:
-        cand = App.objects.filter(install_url__iexact=draft.install_url).first()
-        if cand: return cand
-    # 3. Exact slug
-    cand = App.objects.filter(slug=slugify(draft.slug_hint)[:200]).first()
-    return cand
-```
+1. **Strong identity match → no new App.** `find_soft_duplicate(draft)` returns
+   the existing `App` when the draft shares a strong project identity signal:
+   normalized exact URL, GitHub `owner/repo`, developer domain + sufficiently
+   similar name, or exact slug. In that case the ingest creates another
+   `Source` row for the existing `App` and returns `skipped`.
+2. **Weak duplicate signal → create DRAFT + review candidate.**
+   `find_duplicate_candidates(draft)` records non-authoritative matches such
+   as shared domain + similar name or very similar name in `DuplicateCandidate`.
+   Editors resolve those in Django Admin; the system does not silently merge.
 
-Soft duplicates are surfaced in admin via a `possible_duplicates` admin filter; merging is manual.
+The LLM-generated description is deliberately not used as a strong identity
+signal. Similar descriptions are only evidence for editorial review when backed
+by URL/name/domain signals.
 
 ---
 
