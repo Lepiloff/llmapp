@@ -143,9 +143,10 @@ behavior в продакшен-окружении на готовых 24 кар�
 - [ ] Первый rotated digest пришёл editor'у (07:30 UTC). Если очередь >0 — editor'нул хотя бы 3 entries чтобы померить acceptance rate.
 - [ ] SLA-дашборд `/admin/agent/needsreviewqueueentry/sla-dashboard/` показывает «OK» (oldest pending <14 дней).
 
-### 2.4 MCP Registry watch
-- [ ] Если registry 404 продолжается: связаться с MCP-командами (Anthropic / OpenAI) напрямую, выяснить новый endpoint. Sprint 2 Sentry-alert ловит это автоматически.
-- [ ] Альтернативно: пометить MCP Registry источник `is_active=False` и положиться только на GitHub-MCP discovery.
+### 2.4 MCP Registry v0 smoke
+- [x] `/v0/servers` verified 200 on 2026-05-23; старый `/v1/servers` остаётся 404.
+- [ ] На prod/staging проверить `MCP_REGISTRY_BASE_URL=https://registry.modelcontextprotocol.io/v0`.
+- [ ] После deploy прогнать один smoke-run `ingest_mcp_registry` и убедиться, что новые/обновлённые записи попадают в DRAFT без auto-publish.
 
 ---
 

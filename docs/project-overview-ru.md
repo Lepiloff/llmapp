@@ -44,11 +44,11 @@ Claude, Gemini CLI или MCP-compatible client, и попадает на
 
 ---
 
-## 3. Текущее состояние (на 2026-05-20)
+## 3. Текущее состояние (на 2026-05-23)
 
 | Метрика | Значение |
 |---|---|
-| Опубликованных приложений | 24 baseline; локально после имитации approve видны также pilot-карточки Gemini/Claude |
+| Опубликованных приложений | 24 baseline; локально после имитации approve видны pilot-карточки Gemini/Claude/ChatGPT |
 | Платформ | 5 (ChatGPT, Claude, Gemini, MCP, Enterprise) |
 | Категорий | 10 (Productivity, Developer Tools, …) |
 | LLM-стоимость текущего месяца | $0.20 (бюджет $20) |
@@ -161,10 +161,10 @@ end-to-end. Цель — в идеале редактор только нажи�
 парсит JSON-каталог, для каждого нового сервера создаёт `Source`
 строку и DRAFT-карточку в `App`. Никаких LLM-вызовов на этом этапе.
 
-> **Особенность:** на 2026-05-16 endpoint MCP Registry изменился и
-> возвращает 404. Задача обрабатывает это gracefully (counters=0,
-> no crash). Phase 3 (GitHub MCP search) — основной активный
-> источник новых карточек.
+> **Особенность:** старый endpoint `/v1/servers` на 2026-05-23 всё ещё
+> возвращает 404. Код переведён на `MCP_REGISTRY_BASE_URL=https://registry.modelcontextprotocol.io/v0`;
+> `/v0/servers` отвечает 200. GitHub MCP search остаётся дополнительным
+> источником новых карточек, а не заменой MCP Registry.
 
 ### Phase 3 — Discovery (RSS + GitHub MCP search + direct ingest)
 
@@ -421,5 +421,6 @@ re-actualization).
 — защитить редактора от мусора (cheap-LLM фильтр, evidence-required,
 confidence-floor) и от перерасхода ($20/мес латчи).
 
-Готов к проду; список open items — F1 (Anthropic provider) и B3
-(official directories), оба заблокированы внешними факторами, не кодом.
+Кодовый baseline готов. Open items: production rollout/pilot review,
+F1 (Anthropic provider) и hardening официального ChatGPT-source после
+ToS/partner-channel review; они не блокируют локальный MVP ingest.

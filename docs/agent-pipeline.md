@@ -282,11 +282,12 @@ Phase 4 re-actualization строится поверх существующег�
 **Discovery — директории и сторонние индексы:**
 
 - Перед началом — **юридическая проверка ToS** каждой директории. Если запрещён программный доступ — пропускаем источник или ищем официальный API.
-- Если ToS позволяют:
-  - `apps/agent/sources/chatgpt_apps.py`, `claude_connectors.py`, `gemini_extensions.py`.
-  - httpx + BS4 для статического HTML; если JS-rendered — отдельный optional Playwright-сервис в docker-compose, логируем "needs JS" если не доступен.
-  - Conservative scraping: 1 RPS на домен, User-Agent identifying, robots.txt обязательно.
-  - Failure mode: ошибка скрейпинга → Sentry, не падаем; следующий run попробует снова.
+- Реализовано для MVP:
+  - `apps/agent/sources/gemini_extensions.py` — JSON ingest.
+  - `apps/agent/sources/claude_connectors.py` — static HTML + BS4, robots.txt enforcement.
+  - `apps/agent/sources/chatgpt_apps.py` — static HTML + BS4 по стороннему crawlable index.
+  - Conservative scraping: 1 RPS на домен, User-Agent identifying, robots.txt для HTML-crawl источников.
+  - Failure mode: ошибка скрейпинга → Sentry/log counters, batch не публикует автоматически; следующий run попробует снова.
 - ChatGPT MVP использует `mcpapp.net/chatgpt-apps` как third-party
   crawlable index и пишет `Source.source_type=chatgpt_unofficial`;
   official OpenAI source остаётся отдельным hardening item.
@@ -294,7 +295,7 @@ Phase 4 re-actualization строится поверх существующег�
 
 **Re-actualization:**
 
-- Миграция: `Source.last_enriched_at = DateTimeField(null=True, blank=True)`. Backfill: `last_enriched_at = fetched_at` для существующих.
+- `Source.last_enriched_at` уже есть в модели; re-actualization использует его как cadence marker. Backfill: `last_enriched_at = fetched_at` для существующих.
 - `apps/agent/pipeline/reactualize.py`:
   - Вход: `AppSnapshot` + список fresh `FetchResult`.
   - Re-run enrichment, считаем `EnrichedDraft`.
@@ -329,7 +330,7 @@ Phase 4 re-actualization строится поверх существующег�
 **Безопасность:**
 - API keys только из env. Никогда в коде / БД / логах.
 - LLM-вывод никогда не интерпретируется как код/SQL/URL без явной валидации.
-- robots.txt — обязателен для будущих официальных директорий (B3); RSS / GitHub-API пути его не используют.
+- robots.txt — обязателен для HTML-crawl источников (`claude_connectors`, `chatgpt_apps`); RSS / GitHub API / Gemini JSON пути его не используют.
 - User-Agent identifying (`LLMAppMarket-Agent/1.0; +https://llmappmarket.com/bots`).
 - Rate limit per domain hard-enforced cross-process — `RedisDomainRateLimiter` (Sprint 1, май 2026); Lua-script atomicity coordinates все Celery worker child-processes. In-memory limiter (`apps/agent/pipeline/rate_limit.py::InMemoryDomainRateLimiter`) — fallback на старте если Redis недоступен.
 
@@ -383,7 +384,7 @@ Phase 4 re-actualization строится поверх существующег�
 - `apps/sources/utils.py` — вынести `_check_app_links` как pure helper для переиспользования в `apps/agent/pipeline/validate.py`.
 
 **Изменения в Phase 1+:**
-- `apps/sources/models.py` — добавить `Source.last_enriched_at` в Phase 4 (миграция).
+- `apps/sources/models.py` — `Source.last_enriched_at` уже добавлен; Phase 4 использует поле для cadence/re-actualization.
 - `config/settings/base.py:214-235` — расширить `CELERY_BEAT_SCHEDULE` на agent-задачи (по фазам). После Sprint 1 в расписании также operational-задачи (sitemap, retention, trending recalc, quality recalc, SEO reports, popular searches) — не только agent.
 - `config/settings/base.py` — env vars для LLM, budget, rate limits. Sprint 1 добавил retention env'ы: `AGENT_LOG_RETENTION_DAYS=180`, `SOURCES_LINK_CHECK_RETENTION_DAYS=30`, `SEARCH_LOG_RETENTION_DAYS=90`.
 - `pyproject.toml:6-33` — новые зависимости (Phase 1).

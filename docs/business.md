@@ -147,21 +147,21 @@ LLM App Market — это **самый понятный кросс-платфо�
 - **Что это**: приложение, опубликованное в ChatGPT App Directory от OpenAI.
 - **Установка**: через ChatGPT (в чате или из директории), требует учётной записи OpenAI.
 - **Ключевые атрибуты карточки**: official directory URL, required plan (Free / Plus / Pro / Enterprise), регион-ограничения, поддерживаемые модели.
-- **Источник данных**: ручной curated + ссылки на официальный directory.
+- **Источник данных**: MVP auto-discovery через сторонний crawlable index `mcpapp.net/chatgpt-apps` (`chatgpt_unofficial`) + ручная проверка редактором. Официальный OpenAI directory остаётся hardening item после ToS/partner-channel review.
 
 ### 5.2. Claude Connector
 
 - **Что это**: проверенная MCP-интеграция, попавшая в Claude Connectors Directory от Anthropic.
 - **Установка**: внутри настроек Claude (Web / Desktop / Mobile).
 - **Ключевые атрибуты**: directory URL, требуемые scopes, поддерживаемые сценарии (read vs action), наличие интерактивного UI.
-- **Источник данных**: ручной curated.
+- **Источник данных**: автоматический conservative HTML-crawl `ClaudeConnectorsSource` с robots.txt enforcement + ручная проверка редактором.
 
 ### 5.3. Interactive Claude App
 
 - **Что это**: коннектор, который рендерит полноценный UI внутри чата Claude (доски, графики, дизайн-инструменты).
 - **Установка**: как Claude Connector, но с пометкой «interactive UI».
 - **Ключевые атрибуты**: тот же набор + флаг `interactive_ui = true`, скриншоты UI.
-- **Источник данных**: ручной curated.
+- **Источник данных**: из Claude/ChatGPT discovery, если источник явно показывает interactive/multi-surface признак; финальная маркировка остаётся редакторской.
 
 ### 5.4. MCP Server
 
@@ -170,12 +170,12 @@ LLM App Market — это **самый понятный кросс-платфо�
 - **Ключевые атрибуты**: protocol version, transport (stdio/SSE/HTTP), required env-переменные, open-source-флаг, репозиторий.
 - **Источник данных**: автоматический ingest из MCP Registry + submissions.
 
-### 5.5. Gemini Connected App
+### 5.5. Gemini App / Extension
 
-- **Что это**: приложение или сервис, который Gemini может использовать с разрешения пользователя.
-- **Установка**: внутри настроек Gemini / Google Account.
-- **Ключевые атрибуты**: required Google scopes, тип интеграции (data access vs action).
-- **Источник данных**: ручной curated.
+- **Что это**: приложение, сервис или developer-extension, который работает в Gemini/Google AI tooling.
+- **Установка**: зависит от поверхности: Gemini / Google Account / CLI Extension.
+- **Ключевые атрибуты**: required Google scopes, тип интеграции (data access vs action), developer-tool vs consumer-grade surface.
+- **Источник данных**: автоматический JSON ingest `GeminiExtensionsSource` + ручная проверка редактором.
 
 ### 5.6. Опционально: Enterprise Agent
 
@@ -694,9 +694,9 @@ quality_score =
 ### 13.2. Claude Connectors Directory
 
 - Источник: каталог проверенных интеграций Claude.
-- Метод: ручной curated.
-- Частота: ручной обход 1 раз в неделю.
-- Поле `Source.source_type` = `manual_claude_connectors`.
+- Метод: `ClaudeConnectorsSource` делает conservative HTML-crawl с robots.txt enforcement и создаёт DRAFT-карточки.
+- Частота: weekly beat после pilot review.
+- Поле `Source.source_type` = `claude_connectors`.
 
 ### 13.3. Interactive Claude Apps
 
@@ -704,12 +704,20 @@ quality_score =
 - Метод: ручной, помечается флагом `interactive_ui = true`.
 - Особенность: важна выборочная проверка скриншотов и user-flow.
 
-### 13.4. MCP Registry (автоматический ingest)
+### 13.4. Gemini Extensions
+
+- Источник: официальный/публичный JSON feed Gemini Extensions.
+- Метод: `GeminiExtensionsSource` нормализует JSON в DRAFT-карточки.
+- Частота: daily beat после pilot review.
+- Поле `Source.source_type` = `gemini_extensions`.
+- Особенность: developer-tool extensions не смешиваются с consumer-grade Gemini Apps без редакторской проверки типа листинга.
+
+### 13.5. MCP Registry (автоматический ingest)
 
 - Источник: официальный MCP Registry (REST API).
 - Метод: Celery-задача `ingest_mcp_registry`, ежедневно.
 - Что делает:
-  1. Тянет список серверов из `/v1/servers` (с пагинацией).
+  1. Тянет список серверов из `/v0/servers` (с пагинацией).
   2. Нормализует поля в нашу модель `App`.
   3. Создаёт записи `App` со статусом `draft`, `platform_verification_status = official` (раз сервер числится в публичном реестре), `editorial_review_status = unreviewed`.
   4. Создаёт связи `AppPlatform` (MCP) с заполнением protocol_version / transport / repository_url из payload.
@@ -729,17 +737,17 @@ quality_score =
 - При смене внешнего ID того же сервера — данные не дублируются, а сшиваются по `developer_url` + fuzzy name (см. § 11.4).
 - При исчезновении сервера из реестра — карточка не удаляется молча. Помечается `Source.is_active = false`, попадает в очередь «*Vanished from registry — review*» для решения редактора (deprecate или оставить как community).
 
-### 13.5. Submissions
+### 13.6. Submissions
 
 - Источник: публичная форма `/submit/`.
 - Особенность: всегда требует модерации.
 
-### 13.6. Editorial picks
+### 13.7. Editorial picks
 
 - Источник: ручной выбор редактора.
 - Это carded apps, попавшие в подборку, на главную или в digest.
 
-### 13.7. Что НЕ делаем
+### 13.8. Что НЕ делаем
 
 
 - Не импортируем сторонние списки тысяч AI-tools.
