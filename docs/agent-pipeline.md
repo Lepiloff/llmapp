@@ -17,7 +17,7 @@
 4. **Validation & Persistence** — проверяет (URL liveness, дедуп, hallucination guardrails) и пишет в БД как DRAFT.
 5. **Re-actualization** — периодически перепроверяет существующие карточки, диффит, **все App-field изменения идут в очередь редактора**.
 
-**Hard constraint** (business.md § 13.7): LLM **никогда** не публикует автоматически и **никогда** не перезаписывает редакторские правки. Все его выводы идут в DRAFT, `editorial_review_status = UNREVIEWED`, финальное решение всегда за редактором.
+**Hard constraint** (business.md): LLM **никогда** не публикует автоматически и **никогда** не перезаписывает редакторские правки. Все его выводы идут в DRAFT, `editorial_review_status = UNREVIEWED`, финальное решение всегда за редактором.
 
 **Цель архитектуры:** код, который потенциально вынесется в отдельный автономный сервис, изолирован от Django с самого начала (через `TaxonomySnapshot`-seam) — извлечение позже это перемещение файлов, а не переписывание.
 
@@ -107,14 +107,14 @@ apps/agent/
 
 **Phase 0 → Phase 1 acceptance criteria** (quality gate, не календарный):
 
-Переход к Phase 1 разрешён только когда **все** пункты выполнены и зафиксированы (в `docs/agent-rollout-log.md` или PR-описании):
+Переход к Phase 1 разрешён только когда **все** пункты выполнены и зафиксированы в PR/commit notes или в актуальном checklist-документе:
 
 1. *(quantitative)* 100% MCP-импортированных `App` имеют запись `AppPlatform` для платформы `mcp` (`AppPlatform.objects.filter(platform__slug='mcp', app__sources__source_type='mcp_registry').distinct().count() == App.objects.filter(sources__source_type='mcp_registry').distinct().count()`).
 2. *(quantitative)* 100% MCP-импортированных `App` имеют `platform_verification_status='official'` (a не `not_listed`/`unknown`).
 3. *(quantitative)* `ingest_mcp_registry` идемпотентен: второй запуск подряд с одинаковым registry payload даёт 0 новых `App`, 0 изменённых `AppPlatform`, 0 новых `Source`.
 4. *(quantitative)* `apps/sources/tasks.py` больше не содержит функций `_process_mcp_server`, `_create_app_from_mcp_server`, `_update_app_from_mcp_server` (grep подтверждает удаление).
 5. *(qualitative)* Schema-mismatched registry-записи попадают в `UnparsedRegistryRecord`, не в worker crash log. Smoke-тест на специально сломанном payload это подтверждает.
-6. *(qualitative)* Pre-check состояния `apps/search/` (signal-based `refresh_search_vector`), URL-routes (`config/urls.py` + `apps/*/urls.py`), миграции `TrigramExtension`/`pg_trgm` задокументирован: либо отметкой "verified" в `docs/agent-rollout-log.md`, либо фикс-PR со ссылкой.
+6. *(qualitative)* Pre-check состояния `apps/search/` (signal-based `refresh_search_vector`), URL-routes (`config/urls.py` + `apps/*/urls.py`), миграции `TrigramExtension`/`pg_trgm` задокументирован в PR/commit notes или исправлен отдельным PR.
 7. *(operational)* Regression-тесты `tests/sources/test_ingest_mcp_registry.py` зелёные, покрывают: создание новой App, обновление существующей App, schema-mismatch row.
 8. *(operational)* Все существующие тесты репозитория зелёные (`pytest`).
 
@@ -204,7 +204,7 @@ apps/agent/
 
 **Phase 1 → Phase 2 acceptance criteria** (quality gate, не календарный):
 
-Переход к Phase 2 разрешён только когда **все** пункты выполнены и зафиксированы (в `docs/agent-rollout-log.md` или PR-описании):
+Переход к Phase 2 разрешён только когда **все** пункты выполнены и зафиксированы в PR/commit notes или в актуальном checklist-документе:
 
 1. *(quantitative)* ≥ 20 MCP DRAFT обогащены в `--dry-run` без записи в БД (логи `EnrichmentTask.status=enriched`, `app=None`).
 2. *(quantitative)* ≥ 10 MCP DRAFT обогащены с реальной записью в `NeedsReviewQueueEntry`.
@@ -214,7 +214,7 @@ apps/agent/
 6. *(qualitative)* Средний cost/card и latency/card зафиксированы в `AgentRun.stats_json` за последние 10 runs. Значения попадают в Cost model (см. секцию ниже) — иначе пересмотр модели / промптов перед Phase 2.
 7. *(qualitative)* Редактор вручную **принял** ≥ 6 из 10 предложений LLM (через будущий Phase 2 admin или временный `manage.py` command для review). Acceptance rate < 60% → вернуться к промптам, не идти дальше.
 8. *(operational)* Все unit-тесты `tests/agent/` зелёные.
-9. *(operational)* Запись о выявленных edge-cases (где LLM регулярно ошибается, галлюцинирует) — в `docs/agent-known-issues.md`. Phase 2 admin UI должен явно сигнализировать эти паттерны редактору.
+9. *(operational)* Выявленные edge-cases (где LLM регулярно ошибается, галлюцинирует) фиксируются в PR/commit notes или в актуальном чеклисте. Phase 2 admin UI должен явно сигнализировать эти паттерны редактору.
 
 Если пункт #7 (acceptance rate) не достигнут — это не баг тестов, а сигнал, что качество промптов недостаточно для масштабирования. В этом случае — итерации над `prompts.py` (v1.0 → v1.1), regression-evals (см. Phase 5 eval pack), и повтор Phase 1 measurement, **без** перехода к Phase 2.
 
@@ -272,7 +272,7 @@ apps/agent/
 
 **Prerequisites (link-checker, deferred from Phase 0):**
 
-Phase 4 re-actualization строится поверх существующего link-checker. До запуска любой автоматизации re-actualization нужно починить два бага в `apps/sources/tasks.py::check_app_links_batch` (зафиксировано в `docs/agent-rollout-log.md`):
+Phase 4 re-actualization строится поверх существующего link-checker. До запуска любой автоматизации re-actualization нужно починить два бага в `apps/sources/tasks.py::check_app_links_batch`:
 
 1. `App.published.filter(last_checked_at__lt=cutoff)` исключает never-checked apps (где `last_checked_at IS NULL`). Меняем на `Q(last_checked_at__lt=cutoff) | Q(last_checked_at__isnull=True)`.
 2. Auto-deprecate срабатывает при `consecutive_failures >= 5`; per business.md § 11.3 и architecture.md § 11 должно быть **7**.

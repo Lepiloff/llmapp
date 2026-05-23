@@ -18,10 +18,9 @@ from django.db import transaction
 from apps.catalog.models import Category, Platform
 
 
-# Demo apps removed once the agent pipeline started producing real
-# entries (docs/agent-rollout-log.md, 2026-05-15). Kept as an empty
-# list so the rest of the command still type-checks; restore from
-# git history if a placeholder catalog is ever needed again.
+# Demo apps were removed once the agent pipeline started producing real
+# entries. Kept as an empty list so the rest of the command still type-checks;
+# restore from git history if a placeholder catalog is ever needed again.
 DEMO_APPS: list[dict] = []
 
 

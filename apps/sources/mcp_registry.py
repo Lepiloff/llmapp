@@ -2,7 +2,7 @@
 
 Architecture refs:
   * docs/architecture.md § 9.2 (MCPRegistrySource)
-  * docs/business.md § 13.4 (preview-status caveats)
+  * docs/business.md § 13.5 (preview-status caveats)
 
 Operational guarantees:
   * HTTP failures of one page stop the batch cleanly; we never re-raise into
@@ -107,7 +107,7 @@ class MCPRegistrySource(BaseSource):
                 _report_to_sentry(exc, base_url=self.base_url, cursor=cursor)
                 return
 
-            # The Registry is preview status (business.md § 13.4): every
+            # The Registry is preview status (business.md § 13.5): every
             # external shape we touch is treated as untrusted.
             try:
                 payload = resp.json()

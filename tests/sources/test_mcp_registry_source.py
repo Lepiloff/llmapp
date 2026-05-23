@@ -1,6 +1,6 @@
 """Regression tests for MCPRegistrySource hardening (Phase 0 follow-up).
 
-The MCP Registry is in **preview** status (docs/business.md § 13.4): the
+The MCP Registry is in **preview** status (docs/business.md § 13.5): the
 schema is explicitly subject to breaking changes. ``iter_drafts`` must
 therefore survive every untrusted shape the upstream API can produce —
 malformed JSON, payload that isn't an object, ``servers`` that isn't a

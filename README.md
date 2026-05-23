@@ -211,7 +211,14 @@ SENTRY_DSN=your-sentry-dsn
 
 ## 📚 Documentation
 
-- [`docs/business.md`](docs/business.md) - Business requirements & strategy
+- [`docs/project-overview-ru.md`](docs/project-overview-ru.md) - current owner-facing status and operating model
+- [`docs/business.md`](docs/business.md) - product scope, taxonomy, editorial rules, source policy
+- [`docs/architecture.md`](docs/architecture.md) - backend architecture and model contracts
+- [`docs/agent-pipeline.md`](docs/agent-pipeline.md) - agent/discovery invariants and rollout gates
+- [`docs/deployment-ru.md`](docs/deployment-ru.md) - production deployment and operations runbook
+- [`docs/pre-launch-checklist.md`](docs/pre-launch-checklist.md) - launch checklist and remaining non-code blockers
+
+Historical brainstorms, rollout logs, and completed implementation plans are kept in git history instead of `docs/`.
 
 ## 🤝 Contributing
 
