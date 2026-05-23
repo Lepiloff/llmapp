@@ -4,7 +4,13 @@ from __future__ import annotations
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import Source, UnparsedRegistryRecord, LinkCheckResult, LinkHealth
+from .models import (
+    DuplicateCandidate,
+    LinkCheckResult,
+    LinkHealth,
+    Source,
+    UnparsedRegistryRecord,
+)
 
 
 @admin.register(Source)
@@ -24,6 +30,62 @@ class SourceAdmin(admin.ModelAdmin):
         return obj.app.name
     app_name.short_description = 'App'
     app_name.admin_order_field = 'app__name'
+
+
+@admin.register(DuplicateCandidate)
+class DuplicateCandidateAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "app_link",
+        "candidate_link",
+        "match_reason",
+        "score",
+        "status",
+        "created_at",
+        "resolved_at",
+    ]
+    list_filter = ["status", "match_reason", "created_at", "resolved_at"]
+    search_fields = ["app__name", "candidate_app__name", "source__external_id"]
+    readonly_fields = [
+        "app",
+        "candidate_app",
+        "source",
+        "match_reason",
+        "score",
+        "evidence",
+        "created_at",
+    ]
+    actions = ["mark_confirmed", "mark_dismissed"]
+
+    def app_link(self, obj):
+        return obj.app.name
+    app_link.short_description = "New draft"
+    app_link.admin_order_field = "app__name"
+
+    def candidate_link(self, obj):
+        return obj.candidate_app.name
+    candidate_link.short_description = "Possible existing app"
+    candidate_link.admin_order_field = "candidate_app__name"
+
+    def mark_confirmed(self, request, queryset):
+        from django.utils import timezone
+
+        count = queryset.update(
+            status=DuplicateCandidate.Status.CONFIRMED,
+            resolved_at=timezone.now(),
+        )
+        self.message_user(request, f"{count} duplicate candidates confirmed.")
+    mark_confirmed.short_description = "Mark selected candidates as confirmed"
+
+    def mark_dismissed(self, request, queryset):
+        from django.utils import timezone
+
+        count = queryset.update(
+            status=DuplicateCandidate.Status.DISMISSED,
+            resolved_at=timezone.now(),
+        )
+        self.message_user(request, f"{count} duplicate candidates dismissed.")
+    mark_dismissed.short_description = "Mark selected candidates as not duplicates"
 
 
 @admin.register(UnparsedRegistryRecord)

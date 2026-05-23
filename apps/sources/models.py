@@ -67,6 +67,76 @@ class Source(models.Model):
         return f"{self.app_id}:{self.source_type}:{self.external_id or '-'}"
 
 
+class DuplicateCandidate(models.Model):
+    """A possible duplicate that needs editor review.
+
+    Strong identity matches are handled automatically by
+    ``upsert_app_from_draft`` by attaching another ``Source`` to the
+    existing App. This table is for weaker signals: similar name, shared
+    domain, or other evidence that is not safe enough for silent merge.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        CONFIRMED = "confirmed", "Confirmed duplicate"
+        DISMISSED = "dismissed", "Not a duplicate"
+
+    app = models.ForeignKey(
+        "catalog.App",
+        on_delete=models.CASCADE,
+        related_name="duplicate_candidates",
+        help_text="Newly created draft that may duplicate candidate_app.",
+    )
+    candidate_app = models.ForeignKey(
+        "catalog.App",
+        on_delete=models.CASCADE,
+        related_name="duplicate_suspicions",
+        help_text="Existing app that may be the same product.",
+    )
+    source = models.ForeignKey(
+        Source,
+        on_delete=models.CASCADE,
+        related_name="duplicate_candidates",
+        null=True,
+        blank=True,
+    )
+    match_reason = models.CharField(max_length=80)
+    score = models.FloatField(default=0)
+    evidence = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "-created_at"],
+                name="sources_dup_status_idx",
+            ),
+            models.Index(
+                fields=["app", "candidate_app"],
+                name="sources_dup_apps_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app", "candidate_app", "match_reason"],
+                name="duplicate_candidate_once_per_reason",
+            ),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"DuplicateCandidate #{self.pk}: app={self.app_id} "
+            f"candidate={self.candidate_app_id}"
+        )
+
+
 class UnparsedRegistryRecord(models.Model):
     """Buffer for MCP Registry rows we couldn't normalize.
 

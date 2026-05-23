@@ -8,8 +8,10 @@ Architecture refs: docs/architecture.md § 9.3–9.5.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Literal
+from urllib.parse import urlparse
 
 from django.db import transaction
 from django.utils import timezone
@@ -27,7 +29,7 @@ from apps.catalog.models import (
 )
 
 from .base import AppDraft
-from .models import Source
+from .models import DuplicateCandidate, Source
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,16 @@ def unique_slug(hint: str) -> str:
 # the old Levenshtein distance ≤ 3 cutoff for typical 10-30 char app names
 # while staying pure-stdlib (no C-extension build at deploy time).
 _NAME_SIMILARITY_THRESHOLD = 0.85
+_WEAK_NAME_SIMILARITY_THRESHOLD = 0.92
+_WEAK_DOMAIN_NAME_SIMILARITY_THRESHOLD = 0.65
+
+
+@dataclass(frozen=True)
+class DuplicateMatch:
+    app: App
+    reason: str
+    score: float
+    evidence: dict
 
 
 def _name_similarity(a: str, b: str) -> float:
@@ -66,27 +78,211 @@ def _name_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def find_soft_duplicate(draft: AppDraft) -> App | None:
-    """Look for an existing App that might be the same product."""
-    if draft.developer_url:
-        for candidate in App.objects.filter(developer_url__iexact=draft.developer_url):
-            if (
-                _name_similarity(candidate.name.lower(), draft.name.lower())
-                >= _NAME_SIMILARITY_THRESHOLD
-            ):
-                return candidate
+def _parse_url(value: str):
+    value = (value or "").strip()
+    if not value:
+        return None
+    if "://" not in value:
+        value = f"https://{value}"
+    parsed = urlparse(value)
+    if not parsed.netloc:
+        return None
+    return parsed
 
-    if draft.install_url:
-        candidate = App.objects.filter(install_url__iexact=draft.install_url).first()
-        if candidate:
-            return candidate
+
+def _normalized_domain(value: str) -> str:
+    parsed = _parse_url(value)
+    if parsed is None:
+        return ""
+    host = (parsed.hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _normalized_url_identity(value: str) -> str:
+    parsed = _parse_url(value)
+    if parsed is None:
+        return ""
+    host = _normalized_domain(value)
+    path = (parsed.path or "/").rstrip("/") or "/"
+    return f"{host}{path}".lower()
+
+
+def _github_repo_identity(value: str) -> str:
+    parsed = _parse_url(value)
+    if parsed is None:
+        return ""
+    host = _normalized_domain(value)
+    if host != "github.com":
+        return ""
+    parts = [part for part in (parsed.path or "").split("/") if part]
+    if len(parts) < 2:
+        return ""
+    owner = parts[0].lower()
+    repo = parts[1].lower()
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return f"github.com/{owner}/{repo}"
+
+
+def _draft_urls(draft: AppDraft) -> list[tuple[str, str]]:
+    return [
+        ("developer_url", draft.developer_url),
+        ("official_page_url", draft.official_page_url),
+        ("install_url", draft.install_url),
+        ("repo_url", draft.repo_url),
+        ("official_directory_url", draft.official_directory_url),
+    ]
+
+
+def _app_urls(app: App) -> list[tuple[str, str]]:
+    return [
+        ("developer_url", app.developer_url),
+        ("official_page_url", app.official_page_url),
+        ("install_url", app.install_url),
+        ("repo_url", app.repo_url),
+    ]
+
+
+def _identity_match(draft: AppDraft, candidate: App) -> DuplicateMatch | None:
+    """Return a strong identity match that is safe for automatic merge."""
+    draft_repo_ids = {
+        repo_id
+        for _, url in _draft_urls(draft)
+        if (repo_id := _github_repo_identity(url))
+    }
+    candidate_repo_ids = {
+        repo_id
+        for _, url in _app_urls(candidate)
+        if (repo_id := _github_repo_identity(url))
+    }
+    shared_repo = draft_repo_ids & candidate_repo_ids
+    if shared_repo:
+        repo = sorted(shared_repo)[0]
+        return DuplicateMatch(
+            app=candidate,
+            reason="github_repo",
+            score=1.0,
+            evidence={"github_repo": repo},
+        )
+
+    draft_url_ids = {
+        normalized
+        for _, url in _draft_urls(draft)
+        if (normalized := _normalized_url_identity(url))
+    }
+    candidate_url_ids = {
+        normalized
+        for _, url in _app_urls(candidate)
+        if (normalized := _normalized_url_identity(url))
+    }
+    shared_url = draft_url_ids & candidate_url_ids
+    if shared_url:
+        url_id = sorted(shared_url)[0]
+        return DuplicateMatch(
+            app=candidate,
+            reason="exact_url",
+            score=1.0,
+            evidence={"url_identity": url_id},
+        )
+
+    draft_developer_domain = _normalized_domain(draft.developer_url)
+    candidate_developer_domain = _normalized_domain(candidate.developer_url)
+    name_score = _name_similarity(candidate.name.lower(), draft.name.lower())
+    if (
+        draft_developer_domain
+        and draft_developer_domain == candidate_developer_domain
+        and name_score >= _NAME_SIMILARITY_THRESHOLD
+    ):
+        return DuplicateMatch(
+            app=candidate,
+            reason="developer_domain_name",
+            score=name_score,
+            evidence={
+                "developer_domain": draft_developer_domain,
+                "name_similarity": name_score,
+            },
+        )
 
     if draft.slug_hint:
-        candidate = App.objects.filter(slug=slugify(draft.slug_hint)[:200]).first()
-        if candidate:
-            return candidate
+        slug = slugify(draft.slug_hint)[:200]
+        if slug and candidate.slug == slug:
+            return DuplicateMatch(
+                app=candidate,
+                reason="slug",
+                score=1.0,
+                evidence={"slug": slug},
+            )
 
     return None
+
+
+def _weak_duplicate_match(draft: AppDraft, candidate: App) -> DuplicateMatch | None:
+    """Return a non-authoritative duplicate signal for editor review."""
+    name_score = _name_similarity(candidate.name.lower(), draft.name.lower())
+
+    draft_domains = {
+        domain
+        for _, url in _draft_urls(draft)
+        if (domain := _normalized_domain(url))
+    }
+    candidate_domains = {
+        domain
+        for _, url in _app_urls(candidate)
+        if (domain := _normalized_domain(url))
+    }
+    shared_domains = draft_domains & candidate_domains
+    if (
+        shared_domains
+        and name_score >= _WEAK_DOMAIN_NAME_SIMILARITY_THRESHOLD
+    ):
+        return DuplicateMatch(
+            app=candidate,
+            reason="shared_domain_similar_name",
+            score=name_score,
+            evidence={
+                "domains": sorted(shared_domains),
+                "name_similarity": name_score,
+            },
+        )
+
+    if name_score >= _WEAK_NAME_SIMILARITY_THRESHOLD:
+        return DuplicateMatch(
+            app=candidate,
+            reason="similar_name",
+            score=name_score,
+            evidence={"name_similarity": name_score},
+        )
+
+    return None
+
+
+def find_soft_duplicate(draft: AppDraft) -> App | None:
+    """Look for an existing App that might be the same product."""
+    for candidate in App.objects.all().only(
+        "id", "name", "slug", "developer_url", "official_page_url",
+        "install_url", "repo_url",
+    ):
+        match = _identity_match(draft, candidate)
+        if match is not None:
+            return match.app
+
+    return None
+
+
+def find_duplicate_candidates(draft: AppDraft, *, limit: int = 5) -> list[DuplicateMatch]:
+    """Return weaker duplicate signals that should be reviewed by an editor."""
+    matches: list[DuplicateMatch] = []
+    for candidate in App.objects.all().only(
+        "id", "name", "slug", "developer_url", "official_page_url",
+        "install_url", "repo_url",
+    ):
+        if _identity_match(draft, candidate) is not None:
+            continue
+        match = _weak_duplicate_match(draft, candidate)
+        if match is not None:
+            matches.append(match)
+    matches.sort(key=lambda item: item.score, reverse=True)
+    return matches[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -299,11 +495,21 @@ def upsert_app_from_draft(draft: AppDraft, source_type: str) -> UpsertOutcome:
         )
         return "skipped"
 
-    return _create_new_app(draft, source_type)
+    duplicate_candidates = find_duplicate_candidates(draft)
+    return _create_new_app(
+        draft,
+        source_type,
+        duplicate_candidates=duplicate_candidates,
+    )
 
 
 @transaction.atomic
-def _create_new_app(draft: AppDraft, source_type: str) -> UpsertOutcome:
+def _create_new_app(
+    draft: AppDraft,
+    source_type: str,
+    *,
+    duplicate_candidates: list[DuplicateMatch] | None = None,
+) -> UpsertOutcome:
     platform_verification = (
         App.PlatformVerificationStatus.OFFICIAL
         if source_type == Source.SourceType.MCP_REGISTRY
@@ -334,7 +540,7 @@ def _create_new_app(draft: AppDraft, source_type: str) -> UpsertOutcome:
     attach_capabilities(app, draft.capabilities, draft.capability_evidence)
     attach_use_cases(app, draft.use_cases)
 
-    Source.objects.create(
+    source = Source.objects.create(
         app=app,
         source_type=source_type,
         external_id=draft.external_id,
@@ -342,4 +548,16 @@ def _create_new_app(draft: AppDraft, source_type: str) -> UpsertOutcome:
         payload=draft.raw_payload,
         is_primary=True,
     )
+
+    for match in duplicate_candidates or []:
+        DuplicateCandidate.objects.get_or_create(
+            app=app,
+            candidate_app=match.app,
+            match_reason=match.reason,
+            defaults={
+                "source": source,
+                "score": match.score,
+                "evidence": match.evidence,
+            },
+        )
     return "new"
