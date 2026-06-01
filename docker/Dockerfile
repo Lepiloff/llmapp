@@ -44,8 +44,9 @@ RUN chmod +x /entrypoint.sh
 # Collect static files (with fallback)
 RUN python manage.py collectstatic --noinput --clear || echo "Static files collection failed, continuing..."
 
-# Create non-root user for security
-RUN groupadd -r django && useradd -r -g django django && \
+# Create non-root user for security. Gunicorn 26 writes its control socket
+# below $HOME, so the runtime user needs a real writable home directory.
+RUN groupadd -r django && useradd -r -m -d /home/django -g django django && \
     chown -R django:django /app
 USER django
 

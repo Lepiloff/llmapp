@@ -182,10 +182,9 @@ sudo usermod -aG docker ubuntu
 docker compose version
 
 # 2. Клонировать и настроить env
-cd /opt
-sudo git clone https://github.com/Lepiloff/llmapp.git llmmarket
-sudo chown -R ubuntu:ubuntu llmmarket
-cd llmmarket
+cd ~
+git clone https://github.com/Lepiloff/llmapp.git llmapp
+cd llmapp
 cp .env.production.example .env
 chmod 600 .env
 nano .env
@@ -289,7 +288,7 @@ docker compose --profile production logs pg_backup --tail=20
 smoke-check запускаем bootstrap прямо на EC2:
 
 ```bash
-cd /opt/llmmarket
+cd ~/llmapp
 ./scripts/bootstrap_prod_catalog.sh
 ```
 
@@ -400,7 +399,7 @@ row».
 
 ### Apply изменений кода
 ```bash
-cd /opt/llmmarket && git pull
+cd ~/llmapp && git pull
 docker compose --profile production up -d --build
 # Миграции прогонит entrypoint.
 ```
@@ -422,7 +421,7 @@ docker compose --profile production exec pg_backup \
 Откат = переключить код:
 
 ```bash
-cd /opt/llmmarket
+cd ~/llmapp
 git log --oneline -10
 git checkout <good-commit-sha>
 docker compose --profile production up -d --build
