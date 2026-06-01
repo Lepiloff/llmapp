@@ -1,8 +1,10 @@
 # Деплой LLM App Market
 
 Первичный деплой проекта + операции «дня 2» (rebuild, rollback,
-мониторинг). Стек: Docker Compose на EC2 + managed Postgres +
-ElastiCache Redis + домен `llmappmarket.com`.
+мониторинг). Базовый стек для первого запуска: один EC2, Docker Compose,
+локальные Postgres 16 + Redis 7, Caddy с автоматическим TLS и домен
+`llmappmarket.com`. После запуска Postgres и Redis можно вынести в RDS /
+ElastiCache без изменения приложения.
 
 Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
 вынесены в [`docs/pre-launch-checklist.md`](pre-launch-checklist.md) —
@@ -15,10 +17,11 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
 3. [Переменные окружения](#переменные-окружения)
 4. [Первичный деплой](#первичный-деплой)
 5. [Smoke checks](#smoke-checks)
-6. [Включение background-задач](#включение-background-задач)
-7. [Операции дня 2](#операции-дня-2)
-8. [Rollback](#rollback)
-9. [Известные особенности](#известные-особенности)
+6. [Первичное наполнение пустой БД](#первичное-наполнение-пустой-бд)
+7. [Включение background-задач](#включение-background-задач)
+8. [Операции дня 2](#операции-дня-2)
+9. [Rollback](#rollback)
+10. [Известные особенности](#известные-особенности)
 
 ---
 
@@ -26,10 +29,10 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
 
 | Компонент | Что нужно |
 |---|---|
-| EC2 | Ubuntu 22.04+, 2 vCPU / 4 GB RAM, открыты 80 + 443. Docker + docker-compose-plugin |
-| Domain | `llmappmarket.com` + `www.…` указывают на EC2 IP. TLS — Cloudflare proxy (proще всего, уже используем для Turnstile) или Caddy / nginx+certbot |
-| Postgres | RDS или Postgres 16 на отдельной EC2. БД `llmmarket` + пользователь. `pg_trgm` доступен для CREATE EXTENSION |
-| Redis | ElastiCache или Redis 7. Открыт 6379 только из SG EC2 |
+| EC2 | Ubuntu 22.04+, 2 vCPU / 4 GB RAM, Elastic IP. В Security Group открыты `22/tcp` только с твоего IP и `80/tcp`, `443/tcp`, `443/udp` для всех |
+| Domain | A-records `llmappmarket.com` + `www.llmappmarket.com` указывают на Elastic IP. На первом запуске использовать DNS-only, TLS выдаст Caddy |
+| Postgres | На первом запуске контейнер Postgres 16 на EC2. Внешний порт привязан только к `127.0.0.1`; `pg_trgm` и `unaccent` создаёт entrypoint |
+| Redis | На первом запуске контейнер Redis 7 без публичного порта |
 | OpenAI | API key с активным billing, доступ к `gpt-5.4-mini` + `gpt-5.4-nano` |
 | GitHub | Fine-grained PAT, read-only public-repo scope (30 req/min на Search + 5000/h на Contents) |
 | SMTP | SES / SendGrid / Postmark для review-digest и budget alerts |
@@ -39,7 +42,8 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
 
 ## Архитектура
 
-`docker-compose.yml` поднимает 5 сервисов + 1 опциональный backup-runner:
+`docker-compose.yml` поднимает 5 базовых сервисов + production edge и
+backup-runner:
 
 ```
                    ┌────────────┐
@@ -55,7 +59,7 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
       ▲                  ▲             └──────────────┘
       │                  │ schedules
       │           ┌──────┴─────┐
-      │           │   beat     │  django_celery_beat, ~19 cron-задач
+      │           │   beat     │  django_celery_beat, ~20 cron-задач
       │           │ (celery)   │  (discovery, retention, sitemap, …)
       │           └────────────┘
       │
@@ -63,10 +67,15 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
 │  pg_backup  │  postgres:16 + awscli, profile=production
 │  (runner)   │  → pg_dump в named volume + опц. S3 upload
 └─────────────┘
+
+┌─────────────┐
+│    caddy    │  profile=production, ports 80/443
+│ TLS + proxy │  → automatic Let's Encrypt → web:8000
+└─────────────┘
 ```
 
 * **web** — gunicorn в контейнере. WhiteNoise отдаёт `/static/*` напрямую
-  с cache-busting hashes, nginx-фронт необязателен.
+  с cache-busting hashes.
 * **worker** — Celery, исполняет LLM-pipeline, link checks, re-actualization,
   search-vector refresh, sitemap rebuild, retention cleanup.
 * **beat** — Celery beat scheduler.
@@ -74,18 +83,20 @@ Non-code задачи (legal, DNS, credentials, editorial-роль и т.д.)
   `docker/Dockerfile.pg_backup` (pg_dump + awscli baked in, без apt-install
   на старте). Бэкап-цикл: dump → gzip → опц. S3 upload → trim
   retention → sleep.
-* **postgres / redis** — в проде заменяются на managed-сервисы через
-  `DATABASE_URL` / `REDIS_URL`.
+* **caddy** — prod-only edge proxy с автоматическим Let's Encrypt TLS.
+* **postgres / redis** — в базовом деплое работают на том же EC2 в
+  контейнерах. Для следующего этапа их можно заменить managed-сервисами
+  через `DATABASE_URL` / `REDIS_URL`.
 
-На EC2 typically запущены: `web`, `worker`, `beat`, `pg_backup` (через
-`--profile production`).
+На EC2 запущены: `postgres`, `redis`, `web`, `worker`, `beat`, `caddy`,
+`pg_backup` (последние два через `--profile production`).
 
 ---
 
 ## Переменные окружения
 
 **Полный список с комментариями — в [`.env.example`](../.env.example) и
-[`.env.production`](../.env.production).** Здесь — только ключевые
+[`.env.production.example`](../.env.production.example).** Здесь — только ключевые
 callout'ы.
 
 ### 🔴 Required — без них boot падает или работа небезопасна
@@ -95,12 +106,15 @@ callout'ы.
 * `ALLOWED_HOSTS=llmappmarket.com,www.llmappmarket.com`
 * `CSRF_TRUSTED_ORIGINS=https://llmappmarket.com,https://www.llmappmarket.com`
 * `SITE_BASE_URL=https://llmappmarket.com`
-* `DATABASE_URL` + `REDIS_URL` + `CELERY_BROKER_URL`
-* `OPENAI_API_KEY` + `AGENT_LLM_MODEL_PRIMARY` + `AGENT_LLM_MODEL_CHEAP`
+* `POSTGRES_PASSWORD` + `DATABASE_URL` + `REDIS_URL` + `CELERY_BROKER_URL`
+
+### 🔴 Required перед включением LLM-задач
+
+* `OPENAI_API_KEY` + `AGENT_LLM_MODEL_PRIMARY` + `AGENT_LLM_MODEL_CHEAP`.
 * 6 `AGENT_OPENAI_*_COST_PER_1M_TOKENS` ключей (используются для cost
-  attribution и budget hard-stop)
-* `AGENT_MONTHLY_BUDGET_USD` — обязательно. Прод бутится с budget=0 →
-  hard-stop сработает сразу.
+  attribution и budget hard-stop).
+* `AGENT_MONTHLY_BUDGET_USD` — обязательно. Пустое значение или `0`
+  отключает budget enforcement и недопустимо при реальных API-вызовах.
 
 ### 🟡 Strongly recommended
 
@@ -112,7 +126,8 @@ callout'ы.
 
 ### 🟢 Feature flags — выключены по умолчанию
 
-* `AGENT_SOURCES_ENABLED=` — discovery off. Включить: `github_mcp,rss`.
+* `AGENT_SOURCES_ENABLED=` — discovery off. Полный список:
+  `gemini_extensions,claude_connectors,chatgpt_apps,github_mcp,rss,enrich_pending`.
 * `AGENT_REACTUALIZATION_ENABLED=False`.
 * `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0` — enforced cross-process через Redis.
 
@@ -130,22 +145,56 @@ DJANGO_SUPERUSER_USERNAME / _EMAIL / _PASSWORD
 ```
 После первого boot переменные можно убрать.
 
+Для односерверного Postgres сгенерировать отдельный пароль и указать
+одно и то же значение в `POSTGRES_PASSWORD` и внутри `DATABASE_URL`:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
+
 ---
 
 ## Первичный деплой
 
 ```bash
-# 1. Подготовить EC2
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
-sudo usermod -aG docker ubuntu                 # relogin
+# 1. На EC2 установить git, Docker Engine и compose-plugin.
+# Использовать официальный Docker apt repository:
+# https://docs.docker.com/engine/install/ubuntu/
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker ubuntu
+# Перезайти по SSH, затем проверить:
+docker compose version
 
 # 2. Клонировать и настроить env
-cd /opt && sudo git clone https://github.com/<you>/llmmarket.git
-sudo chown -R ubuntu:ubuntu llmmarket && cd llmmarket
-cp .env.production .env
-nano .env                                       # заполнить по списку выше
+cd /opt
+sudo git clone https://github.com/Lepiloff/llmapp.git llmmarket
+sudo chown -R ubuntu:ubuntu llmmarket
+cd llmmarket
+cp .env.production.example .env
+chmod 600 .env
+nano .env
 
-# 3. Собрать и поднять
+# 3. Убедиться, что DNS A-records уже указывают на Elastic IP.
+getent ahostsv4 llmappmarket.com
+getent ahostsv4 www.llmappmarket.com
+
+# 4. Собрать и поднять
 docker compose --profile production up -d --build
 ```
 
@@ -153,31 +202,23 @@ docker compose --profile production up -d --build
 migrate → seed reference data (платформы / категории / capabilities /
 listing-types) → опц. createsuperuser → запускает процесс.
 
-### nginx / TLS
+### Caddy / TLS
 
-WhiteNoise отдаёт `/static/*` сам, поэтому nginx нужен **только если
-ты не используешь Cloudflare proxy**. Минимальный конфиг:
+Production profile поднимает `caddy:2.11-alpine`. Конфиг в
+[`docker/caddy/Caddyfile`](../docker/caddy/Caddyfile) проксирует запросы
+на `web:8000`. Когда A-records указывают на EC2 и порты `80`, `443`
+доступны извне, Caddy сам получает и продлевает Let's Encrypt
+сертификаты, а HTTP перенаправляет на HTTPS.
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name llmappmarket.com www.llmappmarket.com;
-    ssl_certificate     /etc/letsencrypt/.../fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/.../privkey.pem;
-    client_max_body_size 10m;
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}
-server { listen 80; server_name llmappmarket.com www.…; return 301 https://$host$request_uri; }
+```bash
+docker compose --profile production logs caddy --tail=100
+curl -fsS https://llmappmarket.com/health/
 ```
 
-С Cloudflare proxy всё проще: TLS на их стороне, gunicorn слышит HTTP,
-нужно только настроить origin-pull rule.
+Cloudflare proxy для первого запуска не нужен. Turnstile работает
+независимо от проксирования трафика. Если позже включаешь Cloudflare
+proxy, используй режим SSL/TLS `Full (strict)`: origin уже обслуживается
+Caddy по HTTPS.
 
 ---
 
@@ -225,7 +266,8 @@ for t in PeriodicTask.objects.order_by('name'):
 "
 ```
 
-Ожидаемо ~19 enabled задач: ingest, discovery×2, re-actualize, link
+Ожидаемо ~20 enabled задач: ingest, discovery×2, pending enrichment,
+re-actualize, link
 checker, budget check, review digest, sitemap rebuild, sitemap ping,
 trending scores, search vectors, popular searches, SEO reports,
 quality recalc, newsletter draft, retention × 4 (agent/links/searches/analytics).
@@ -241,23 +283,67 @@ docker compose --profile production logs pg_backup --tail=20
 
 ---
 
+## Первичное наполнение пустой БД
+
+Локальную dev-БД в production не переносим. После первого успешного
+smoke-check запускаем bootstrap прямо на EC2:
+
+```bash
+cd /opt/llmmarket
+./scripts/bootstrap_prod_catalog.sh
+```
+
+Скрипт запускает MCP Registry v0, Gemini Extensions, Claude Connectors
+и ChatGPT Apps direct-ingest. Они создают `DRAFT`-карточки без
+автопубликации и без OpenAI-вызовов. Результат проверить в:
+
+```text
+/admin/catalog/app/?status__exact=draft
+/admin/sources/duplicatecandidate/
+```
+
+После ручной проверки редактор отмечает карточки reviewed и публикует
+admin action'ом `Publish selected (with validation)`. Это намеренный
+quality gate: фоновые задачи добавляют и обновляют кандидатов
+автоматически, но не публикуют непроверенный контент.
+
+---
+
 ## Включение background-задач
 
-По умолчанию discovery + re-actualization выключены — намеренно. Первый
-запуск делается dry-run'ом, не «по cron'у в 6:30 утра».
+MCP Registry ingest включён всегда и запускается ежедневно в `04:00 UTC`.
+Остальные источники и re-actualization выключены feature flags'ами.
 
-### Discovery
+### Direct-ingest источники
+
+После проверки bootstrap-карточек включить регулярное обновление
+источников без LLM-затрат:
+
+```bash
+nano .env
+# AGENT_SOURCES_ENABLED=gemini_extensions,claude_connectors,chatgpt_apps
+docker compose restart worker beat
+```
+
+Beat: Gemini ежедневно `04:30 UTC`, Claude по вторникам `04:45 UTC`,
+ChatGPT Apps по средам `04:45 UTC`.
+
+### LLM discovery + enrichment
 
 ```bash
 # Dry-run, ~$0.01-0.02
 docker compose exec web python manage.py agent_run --source=github_mcp --limit=5
 
-# Результат осмысленный → включить
-echo 'AGENT_SOURCES_ENABLED=github_mcp,rss' >> .env
+# Результат осмысленный → добавить флаги в существующую строку .env:
+# AGENT_SOURCES_ENABLED=gemini_extensions,claude_connectors,chatgpt_apps,github_mcp,rss,enrich_pending
 docker compose restart worker beat
 ```
 
-Beat: `discover_github_mcp` Пн/Ср/Пт 06:30 UTC, `discover_rss` каждые 6 ч.
+`github_mcp` и `rss` классифицируют кандидатов дешёвой моделью и
+обогащают релевантные карточки основной моделью. `enrich_pending`
+обрабатывает MCP Registry draft-карточки batch'ами. Beat: GitHub MCP
+Пн/Ср/Пт `06:30 UTC`, pending enrichment ежедневно `06:45 UTC`, RSS
+каждые 6 ч.
 
 ### Re-actualization
 
@@ -265,7 +351,7 @@ Beat: `discover_github_mcp` Пн/Ср/Пт 06:30 UTC, `discover_rss` кажды�
 docker compose exec web python manage.py shell -c \
   "from apps.agent.tasks import reactualize_apps_batch; print(reactualize_apps_batch(limit=3, dry_run=True))"
 
-echo 'AGENT_REACTUALIZATION_ENABLED=True' >> .env
+nano .env  # AGENT_REACTUALIZATION_ENABLED=True
 docker compose restart worker beat
 ```
 
@@ -293,6 +379,7 @@ docker compose exec web python manage.py shell -c \
 docker compose logs -f web --tail=100
 docker compose logs -f worker --tail=100
 docker compose logs -f beat --tail=100
+docker compose --profile production logs -f caddy --tail=100
 docker compose --profile production logs -f pg_backup --tail=20
 ```
 
@@ -379,11 +466,10 @@ OpenAI бьёт cached input ~10% от standard. `_estimate_cost_usd`
 `agent_backfill_costs --include-nonzero` для re-pricing исторических
 строк.
 
-### Static — WhiteNoise vs nginx
-Sprint 2 добавил WhiteNoise — gunicorn сам отдаёт `/static/*` с
-правильными cache-busting хэшами. nginx-блок в этом документе — на
-случай если используется без Cloudflare proxy для TLS. Если уже
-есть Cloudflare → nginx не нужен.
+### Static — WhiteNoise + Caddy
+Gunicorn отдаёт `/static/*` через WhiteNoise с правильными
+cache-busting хэшами. Caddy завершает TLS и проксирует запросы к
+gunicorn; отдельный nginx не нужен.
 
 ### CSP в браузере
 Sprint 3 включил Content-Security-Policy в prod-настройках. Allowlist

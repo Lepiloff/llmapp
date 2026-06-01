@@ -30,6 +30,7 @@ REQUIRED_TASKS = {
     "apps.agent.tasks.send_review_queue_digest",
     "apps.agent.tasks.discover_rss",
     "apps.agent.tasks.discover_github_mcp",
+    "apps.agent.tasks.enrich_pending_drafts_batch",
     "apps.agent.tasks.ingest_gemini_extensions",
     "apps.agent.tasks.ingest_claude_connectors",
     "apps.agent.tasks.ingest_chatgpt_apps",

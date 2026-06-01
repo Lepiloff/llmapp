@@ -130,14 +130,15 @@ docker-compose exec postgres psql -U llmmarket -d llmmarket
 
 ## 🌍 Production Deployment
 
-### With Nginx (Recommended)
+### With Caddy HTTPS
 ```bash
-# Start with nginx proxy
-docker-compose --profile production up -d
-
-# SSL setup with Let's Encrypt (manual)
-# Add your SSL certificates to docker/nginx.conf
+# Copy the safe production template, fill secrets, then start the stack.
+cp .env.production.example .env
+docker compose --profile production up -d --build
 ```
+
+The production profile starts Caddy on ports 80/443. Once DNS points to
+the host, Caddy obtains and renews Let's Encrypt certificates automatically.
 
 ### Environment Variables
 

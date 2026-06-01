@@ -43,6 +43,7 @@ from apps.agent.models import (
 from apps.agent.tasks import (
     _run_discovery_batch,
     agent_budget_check,
+    enrich_pending_drafts_batch,
     run_enrich_existing_draft,
     run_reactualize_app,
 )
@@ -285,3 +286,21 @@ def test_discovery_batch_skips_when_budget_threshold_reached() -> None:
     )
 
     assert result == {"skipped": "budget_threshold", "source": "github_mcp"}
+
+
+@override_settings(
+    AGENT_MONTHLY_BUDGET_USD="10",
+    AGENT_SOURCES_ENABLED=["enrich_pending"],
+)
+def test_pending_enrichment_batch_skips_when_budget_threshold_reached() -> None:
+    BudgetMonthState.objects.create(
+        month=first_of_month(),
+        total_cost_usd=Decimal("8.5"),
+        budget_usd=Decimal("10"),
+        discovery_disabled_at=timezone.now(),
+    )
+
+    result = enrich_pending_drafts_batch()
+
+    assert result == {"skipped": "budget_threshold", "source": "enrich_pending"}
+    assert not AgentRun.objects.filter(source_type="agent_enrich_batch").exists()

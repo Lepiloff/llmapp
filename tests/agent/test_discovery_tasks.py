@@ -15,7 +15,7 @@ from apps.agent.llm.schemas import (
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog
 from apps.agent.pipeline.fetch import FetchResult
 from apps.agent.sources.base import DiscoveryCandidate
-from apps.agent.tasks import _run_discovery_batch
+from apps.agent.tasks import _run_discovery_batch, enrich_pending_drafts_batch
 from apps.catalog.models import App, Capability, Category, ListingType, Platform
 from apps.sources.models import Source
 
@@ -161,6 +161,13 @@ def test_discovery_apply_is_feature_flag_guarded() -> None:
     )
 
     assert result == {"skipped": "source_disabled", "source": "github_mcp"}
+    assert not AgentRun.objects.exists()
+
+
+def test_pending_enrichment_apply_is_feature_flag_guarded() -> None:
+    result = enrich_pending_drafts_batch()
+
+    assert result == {"skipped": "source_disabled", "source": "enrich_pending"}
     assert not AgentRun.objects.exists()
 
 

@@ -278,6 +278,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agent.tasks.discover_github_mcp",
         "schedule": crontab(day_of_week="mon,wed,fri", hour=6, minute=30),
     },
+    "agent_enrich_pending_drafts": {
+        "task": "apps.agent.tasks.enrich_pending_drafts_batch",
+        "schedule": crontab(hour=6, minute=45),
+    },
     "ingest_gemini_extensions": {
         "task": "apps.agent.tasks.ingest_gemini_extensions",
         "schedule": crontab(hour=4, minute=30),

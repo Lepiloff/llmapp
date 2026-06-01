@@ -5,11 +5,11 @@
 задачи которые остались. Структурирован по фазам: фаза N разблокирует
 фазу N+1. Каждый пункт можно закрывать независимо.
 
-## Status — 2026-05-20
+## Status — 2026-06-01
 
 | Фаза | Статус |
 |---|---|
-| 0 — Pre-flight (legal, домен, инфра) | 🔴 не начато |
+| 0 — Pre-flight (legal, домен, инфра) | 🟡 EC2, домен и Elastic IP готовы; DNS/TLS/env pending |
 | 1 — Soft launch (catalog видим, discovery off) | блокируется фазой 0 |
 | 2 — Discovery on (LLM-pipeline активен) | блокируется фазой 1; Sprint 4/5 direct-ingest MVP готов |
 | 3 — Growth (контент, monetization, ChatGPT Apps) | блокируется фазой 2 |
@@ -30,18 +30,17 @@
 **Зависит от:** ничего.
 
 ### 0.2 Домен + DNS + HTTPS
-- [ ] Домен `llmappmarket.com` куплен и в управлении.
-- [ ] A-records: `llmappmarket.com` + `www.llmappmarket.com` → IP EC2 (или Cloudflare proxy).
-- [ ] TLS-сертификат:
-  - Вариант A (рекомендую): Cloudflare proxy = TLS на их стороне, EC2 отвечает HTTP. Уже использован для Turnstile, так что один меньше внешний сервис.
-  - Вариант B: Caddy на EC2 = auto Let's Encrypt + renewal без cron.
-  - Вариант C: nginx + certbot + cron-job на renewal.
-- [ ] `SECURE_SSL_REDIRECT` + `SECURE_PROXY_SSL_HEADER` поправлены под выбранную схему.
+- [x] Домен `llmappmarket.com` куплен и в управлении.
+- [ ] A-records: `llmappmarket.com` + `www.llmappmarket.com` → Elastic IP EC2.
+- [ ] На первом запуске DNS-only: production profile поднимает Caddy,
+  который автоматически получает и продлевает Let's Encrypt сертификат.
+- [ ] Если позже включается Cloudflare proxy, выставить SSL/TLS
+  `Full (strict)`: origin уже обслуживается Caddy по HTTPS.
 
 **Owner:** devops/admin.
 **Зависит от:** ничего.
 
-### 0.3 Реальные credentials в `.env.production`
+### 0.3 Реальные credentials в серверном `.env`
 Все плейсхолдеры заменить на боевые значения:
 
 - [ ] `SECRET_KEY` — сгенерирован высоко-энтропийный (`python -c 'import secrets; print(secrets.token_urlsafe(64))'`). Прод бутится с hard-fail если оставить дефолт.
@@ -68,7 +67,7 @@
 ### 0.5 Off-host backup
 - [ ] AWS account / DO Spaces / Backblaze B2 — bucket создан.
 - [ ] IAM-юзер с write-only-разрешением на bucket.
-- [ ] `PG_BACKUP_S3_BUCKET` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` + `AWS_DEFAULT_REGION` в `.env.production`.
+- [ ] `PG_BACKUP_S3_BUCKET` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` + `AWS_DEFAULT_REGION` в серверном `.env`.
 - [ ] Восстановление протестировано: скачать дамп → gunzip → `psql llmmarket < dump.sql` в staging.
 
 **Owner:** devops.
@@ -92,11 +91,13 @@
 
 ## Фаза 1 — Soft launch 🟡 (после 0)
 
-Сайт работает, каталог виден, discovery всё ещё выключен — наблюдаем
-behavior в продакшен-окружении на готовых 24 карточках.
+Сайт работает, direct-ingest bootstrap создаёт draft-карточки прямо
+в production, discovery всё ещё выключен. Редактор проверяет drafts и
+публикует первую выборку через admin quality gate.
 
 ### 1.1 Деплой
-- [ ] Pre-deploy backup текущей dev-БД (если миграция dev-данных).
+- [ ] Локальную dev-БД не переносим: production стартует с пустой БД.
+- [ ] После smoke-check выполнить `./scripts/bootstrap_prod_catalog.sh`.
 - [ ] `docker compose --profile production up -d --build`.
 - [ ] Все шаги из `deployment-ru.md` § Post-deploy smoke checks.
 - [ ] Verify CSP в браузере: открыть `/`, DevTools → console → нет красных CSP-violations.
@@ -114,7 +115,8 @@ behavior в продакшен-окружении на готовых 24 кар�
 
 ### 1.4 Operator решения по env-флагам
 - [ ] `AGENT_MONTHLY_BUDGET_USD`: оставить $20 или поднять до $50-100 для наполнения каталога в первый квартал?
-- [ ] `AGENT_REACTUALIZATION_ENABLED`: оставить False или включить сейчас? (если каталог 24 апп, через 30 дней начнётся re-actualization цикл — стоит включить чтобы не stale'ел).
+- [ ] `AGENT_REACTUALIZATION_ENABLED`: оставить False до первой
+  опубликованной выборки, затем включить чтобы каталог не stale'ел.
 
 ---
 
@@ -129,15 +131,17 @@ behavior в продакшен-окружении на готовых 24 кар�
 - [ ] Проверить `/admin/agent/needsreviewqueueentry/` — кандидаты выглядят осмысленно.
 
 ### 2.2 Включить discovery
-- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss,gemini_extensions,claude_connectors,chatgpt_apps` в env.
+- [ ] `AGENT_SOURCES_ENABLED=github_mcp,rss,gemini_extensions,claude_connectors,chatgpt_apps,enrich_pending` в env.
 - [ ] `docker compose restart worker beat`.
 - [ ] Beat schedule:
   - `discover_github_mcp` Пн/Ср/Пт 06:30 UTC
+  - `enrich_pending_drafts_batch` daily 06:45 UTC
   - `discover_rss` каждые 6 часов
   - `ingest_gemini_extensions` daily 04:30 UTC
   - `ingest_claude_connectors` Tuesday 04:45 UTC
   - `ingest_chatgpt_apps` Wednesday 04:45 UTC
-- [ ] Before production beat: Phase A pilot уже пройден локально; повторить на prod/staging через `agent_run --source=gemini_extensions --limit=30 --apply`, `agent_run --source=claude_connectors --limit=5 --apply`, `agent_run --source=chatgpt_apps --limit=10 --apply`.
+- [ ] До включения production beat выполнить
+  `./scripts/bootstrap_prod_catalog.sh` и проверить созданные draft-карточки.
 
 ### 2.3 Editorial-cadence
 - [ ] Первый rotated digest пришёл editor'у (07:30 UTC). Если очередь >0 — editor'нул хотя бы 3 entries чтобы померить acceptance rate.

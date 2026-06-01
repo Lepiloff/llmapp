@@ -414,6 +414,11 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
     Selector: DRAFT App that has no Source row with ``external_id``
     starting with ``agent-enrich:`` (see ``pending_enrichment_app_ids``).
     """
+    if not dry_run and not _source_enabled(SOURCE_FLAG_ENRICH_PENDING):
+        return {"skipped": "source_disabled", "source": SOURCE_FLAG_ENRICH_PENDING}
+    if not dry_run and is_discovery_disabled():
+        return {"skipped": "budget_threshold", "source": SOURCE_FLAG_ENRICH_PENDING}
+
     run = AgentRun.objects.create(
         source_type="agent_enrich_batch",
         status=(
