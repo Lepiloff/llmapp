@@ -101,11 +101,23 @@ class ChatGPTAppsSource(BaseSource):
             if not cards:
                 break
 
+            new_cards = []
             for card in cards:
                 detail_url = card.get("detail_url") or ""
                 if not detail_url or detail_url in seen_urls:
                     continue
                 seen_urls.add(detail_url)
+                new_cards.append(card)
+
+            if not new_cards:
+                logger.info(
+                    "chatgpt_apps_no_new_cards",
+                    extra={"url": page_url, "page": page},
+                )
+                break
+
+            for card in new_cards:
+                detail_url = card.get("detail_url") or ""
                 try:
                     detail_html = self.fetch_text(detail_url)
                     detail = parse_detail_page(detail_html, detail_url=detail_url)

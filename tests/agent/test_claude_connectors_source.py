@@ -120,3 +120,31 @@ def test_source_without_max_pages_follows_pagination_until_last_page() -> None:
 
     assert [draft.name for draft in drafts] == ["Acme Docs", "Beta Docs"]
     assert "https://claude.com/connectors?page=2" in fetched
+
+
+def test_source_stops_when_next_page_repeats_same_cards() -> None:
+    cc._ROBOTS_CACHE.clear()
+    page_1 = INDEX_HTML + '<a href="/connectors?page=2">Next</a>'
+    page_2 = INDEX_HTML + '<a href="/connectors?page=3">Next</a>'
+    responses = {
+        "https://claude.com/robots.txt": ROBOTS_ALLOW,
+        "https://claude.com/connectors": page_1,
+        "https://claude.com/connectors?page=2": page_2,
+        "https://claude.com/connectors/acme-docs": DETAIL_HTML,
+    }
+    fetched = []
+
+    def fetch(url: str) -> str:
+        fetched.append(url)
+        return responses[url]
+
+    source = ClaudeConnectorsSource(
+        base_url="https://claude.com/connectors",
+        fetch_text=fetch,
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert [draft.name for draft in drafts] == ["Acme Docs"]
+    assert "https://claude.com/connectors?page=2" in fetched
+    assert "https://claude.com/connectors?page=3" not in fetched

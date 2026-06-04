@@ -223,6 +223,58 @@ def test_happy_path_single_page_yields_valid_draft() -> None:
     assert draft.capabilities["open_source"] == "yes"
 
 
+def test_current_registry_wrapper_schema_yields_valid_draft() -> None:
+    source = _source_with(
+        _response(payload={
+            "metadata": {"count": 1},
+            "servers": [{
+                "_meta": {
+                    "io.modelcontextprotocol.registry/official": {
+                        "status": "active",
+                        "isLatest": True,
+                        "publishedAt": "2026-04-13T17:32:20Z",
+                        "updatedAt": "2026-04-14T17:32:20Z",
+                    }
+                },
+                "server": {
+                    "$schema": (
+                        "https://static.modelcontextprotocol.io/schemas/"
+                        "2025-12-11/server.schema.json"
+                    ),
+                    "name": "acme.example/docs",
+                    "title": "Acme Docs",
+                    "description": "Remote MCP server for Acme docs.",
+                    "version": "1.2.3",
+                    "repository": {
+                        "url": "https://github.com/acme/docs-mcp",
+                        "source": "github",
+                    },
+                    "remotes": [
+                        {
+                            "type": "streamable-http",
+                            "url": "https://acme.example/mcp",
+                        }
+                    ],
+                },
+            }],
+        })
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert len(drafts) == 1
+    draft = drafts[0]
+    assert draft.name == "Acme Docs"
+    assert draft.external_id == "acme.example/docs"
+    assert draft.official_page_url == "https://github.com/acme/docs-mcp"
+    assert draft.official_directory_url.endswith("/servers/acme.example%2Fdocs")
+    assert draft.capabilities["remote_available"] == "yes"
+    assert draft.capabilities["open_source"] == "yes"
+    assert draft.platform_metadata["version"] == "1.2.3"
+    assert draft.platform_metadata["transport"] == "streamable-http"
+    assert draft.platform_metadata["is_latest"] is True
+
+
 def test_pagination_stops_when_next_cursor_is_not_string() -> None:
     """Defensive: a malformed ``next_cursor`` (None, number, list) ends pagination."""
     source = _source_with(
@@ -250,6 +302,24 @@ def test_pagination_follows_string_next_cursor() -> None:
         _response(payload={
             "servers": [{"id": "p2", "name": "P2"}],
             "schema_version": "1.0",
+        }),
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert {d.external_id for d in drafts} == {"p1", "p2"}
+
+
+def test_pagination_follows_metadata_next_cursor() -> None:
+    """Current Registry uses ``metadata.nextCursor`` instead of ``next_cursor``."""
+    source = _source_with(
+        _response(payload={
+            "servers": [{"id": "p1", "name": "P1"}],
+            "metadata": {"nextCursor": "page-2", "count": 1},
+        }),
+        _response(payload={
+            "servers": [{"id": "p2", "name": "P2"}],
+            "metadata": {"count": 1},
         }),
     )
 

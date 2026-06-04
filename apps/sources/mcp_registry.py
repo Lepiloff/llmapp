@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from typing import Iterable
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -85,7 +86,7 @@ class MCPRegistrySource(BaseSource):
         return s
 
     def _server_url(self, external_id: str) -> str:
-        return f"{self.base_url}/servers/{external_id}"
+        return f"{self.base_url}/servers/{quote(external_id, safe='')}"
 
     # ------------------------------------------------------------------
     # Iteration
@@ -128,7 +129,7 @@ class MCPRegistrySource(BaseSource):
                 )
                 return
 
-            schema_version = str(payload.get("schema_version", "unknown"))
+            schema_version = str(payload.get("schema_version") or "unknown")
             self.observed_schema_versions.add(schema_version)
 
             servers = payload.get("servers")
@@ -169,6 +170,8 @@ class MCPRegistrySource(BaseSource):
                     continue
 
             cursor = payload.get("next_cursor")
+            if cursor is None and isinstance(payload.get("metadata"), dict):
+                cursor = payload["metadata"].get("nextCursor")
             if not isinstance(cursor, str) or not cursor:
                 break
 
@@ -180,24 +183,40 @@ class MCPRegistrySource(BaseSource):
             raise MCPRegistrySchemaError(
                 f"record is not a dict (got {type(record).__name__})"
             )
+        original_record = record
+        meta = record.get("_meta") if isinstance(record.get("_meta"), dict) else {}
+        if isinstance(record.get("server"), dict):
+            record = record["server"]
+        schema_url = str(record.get("$schema") or "")
+        if schema_url:
+            self.observed_schema_versions.add(schema_url)
         try:
             name = record["name"]
-            external_id = record["id"]
         except KeyError as exc:
             raise MCPRegistrySchemaError(f"missing required field {exc}") from None
+        external_id = str(record.get("id") or name)
+        display_name = str(record.get("title") or name)
 
         transports = record.get("transports") or {}
         publisher = record.get("publisher") or {}
         install = record.get("install") or {}
         repo = record.get("repository") or {}
+        remotes = record.get("remotes") if isinstance(record.get("remotes"), list) else []
+        packages = record.get("packages") if isinstance(record.get("packages"), list) else []
+        official_meta = meta.get("io.modelcontextprotocol.registry/official")
+        if not isinstance(official_meta, dict):
+            official_meta = {}
+
+        has_remote = bool(
+            transports.get("http")
+            or transports.get("sse")
+            or any(isinstance(remote, dict) and remote.get("url") for remote in remotes)
+        )
+        has_local = bool(transports.get("stdio") or packages)
 
         capabilities = {
-            "remote_available": (
-                "yes" if transports.get("http") or transports.get("sse") else "unknown"
-            ),
-            "local_setup_required": (
-                "yes" if transports.get("stdio") else "unknown"
-            ),
+            "remote_available": "yes" if has_remote else "unknown",
+            "local_setup_required": "yes" if has_local else "unknown",
             "open_source": "yes" if repo else "unknown",
         }
 
@@ -205,30 +224,63 @@ class MCPRegistrySource(BaseSource):
             (t for t in ("stdio", "sse", "http", "websocket") if transports.get(t)),
             None,
         )
+        if transport_pick is None:
+            transport_pick = next(
+                (
+                    str(remote.get("type"))
+                    for remote in remotes
+                    if isinstance(remote, dict) and remote.get("type")
+                ),
+                None,
+            )
+
+        remote_url = next(
+            (
+                str(remote.get("url"))
+                for remote in remotes
+                if isinstance(remote, dict) and remote.get("url")
+            ),
+            "",
+        )
+        package_url = next(
+            (
+                str(package.get("url"))
+                for package in packages
+                if isinstance(package, dict) and package.get("url")
+            ),
+            "",
+        )
 
         return AppDraft(
-            name=name,
-            slug_hint=slugify(name)[:200],
+            name=display_name,
+            slug_hint=slugify(display_name or name)[:200],
             short_description=(record.get("description") or "")[:280],
             long_description=record.get("description") or "",
             developer_name=publisher.get("name") or "",
             developer_url=publisher.get("url") or "",
-            official_page_url=record.get("homepage") or "",
-            install_url=install.get("url") or "",
+            official_page_url=record.get("homepage") or repo.get("url") or remote_url,
+            install_url=install.get("url") or package_url,
             repo_url=repo.get("url") or "",
             platforms=["mcp"],
             listing_types=["mcp-server"],
             capabilities=capabilities,
-            external_id=str(external_id),
-            raw_payload=record,
+            external_id=external_id,
+            raw_payload=original_record,
             # The MCP Registry IS the platform directory in our taxonomy.
-            official_directory_url=self._server_url(str(external_id)),
+            official_directory_url=self._server_url(external_id),
             platform_metadata={
                 "protocol_version": record.get("protocol_version"),
+                "version": record.get("version"),
                 "transport": transport_pick,
                 "repository_url": repo.get("url"),
                 "install_command": install.get("command"),
                 "required_env_vars": install.get("env", []) or [],
+                "remotes": remotes,
+                "packages": packages,
+                "is_latest": official_meta.get("isLatest"),
+                "status": official_meta.get("status"),
+                "published_at": official_meta.get("publishedAt"),
+                "updated_at": official_meta.get("updatedAt"),
             },
         )
 

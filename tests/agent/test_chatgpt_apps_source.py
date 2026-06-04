@@ -138,3 +138,33 @@ def test_source_without_max_pages_follows_pagination_until_last_page() -> None:
 
     assert [draft.name for draft in drafts] == ["Acme Chat", "Beta Chat"]
     assert "https://mcpapp.net/chatgpt-apps?page=2" in fetched
+
+
+def test_source_stops_when_next_page_repeats_same_cards() -> None:
+    ca._ROBOTS_CACHE.clear()
+    repeated_page = INDEX_HTML.replace(
+        "/chatgpt-apps?page=2",
+        "/chatgpt-apps?page=3",
+    )
+    responses = {
+        "https://mcpapp.net/robots.txt": ROBOTS_ALLOW,
+        "https://mcpapp.net/chatgpt-apps": INDEX_HTML,
+        "https://mcpapp.net/chatgpt-apps?page=2": repeated_page,
+        "https://mcpapp.net/app/acme-chat": DETAIL_HTML,
+    }
+    fetched = []
+
+    def fetch(url: str) -> str:
+        fetched.append(url)
+        return responses[url]
+
+    source = ChatGPTAppsSource(
+        index_url="https://mcpapp.net/chatgpt-apps",
+        fetch_text=fetch,
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert [draft.name for draft in drafts] == ["Acme Chat"]
+    assert "https://mcpapp.net/chatgpt-apps?page=2" in fetched
+    assert "https://mcpapp.net/chatgpt-apps?page=3" not in fetched
