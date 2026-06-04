@@ -6,7 +6,9 @@ from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
+from apps.catalog import signals as catalog_signals
 from apps.catalog.models import App
+from apps.search.tasks import refresh_app_search_vector
 from apps.sources.base import AppDraft
 from apps.sources.mcp_registry import MCPRegistrySchemaError, MCPRegistrySource
 from apps.sources.models import Source
@@ -56,21 +58,41 @@ class Command(BaseCommand):
             return
 
         counters = {"split": 0, "skipped": 0, "failed": 0}
+        created_app_ids: list[int] = []
         normalizer = MCPRegistrySource()
-        for source in candidates:
-            try:
-                draft = normalizer._normalize(source.payload or {})
-            except MCPRegistrySchemaError:
-                counters["failed"] += 1
-                continue
-            outcome = _split_source(source.pk, draft)
-            counters[outcome] += 1
+
+        # This repair can create hundreds of Apps. The normal App/AppCapability
+        # signals enqueue one Celery task per relation write; doing that inside
+        # every transaction turns a tiny data repair into a Redis-bound job.
+        # Suppress scheduling only for this management command and refresh the
+        # created rows synchronously below.
+        original_schedule_refresh = catalog_signals._schedule_refresh
+        catalog_signals._schedule_refresh = lambda app_id: None
+        try:
+            for source in candidates:
+                try:
+                    draft = normalizer._normalize(source.payload or {})
+                except MCPRegistrySchemaError:
+                    counters["failed"] += 1
+                    continue
+                outcome, app_id = _split_source(source.pk, draft)
+                counters[outcome] += 1
+                if app_id is not None:
+                    created_app_ids.append(app_id)
+        finally:
+            catalog_signals._schedule_refresh = original_schedule_refresh
+
+        for app in App.objects.filter(pk__in=created_app_ids).prefetch_related(
+            "platforms", "categories", "use_cases"
+        ):
+            refresh_app_search_vector(app)
 
         self.stdout.write(
             self.style.SUCCESS(
                 "[APPLIED] mcp_registry_splits "
                 f"split={counters['split']} skipped={counters['skipped']} "
-                f"failed={counters['failed']}"
+                f"failed={counters['failed']} "
+                f"search_refreshed={len(created_app_ids)}"
             )
         )
 
@@ -95,16 +117,16 @@ def _candidate_sources():
 
 
 @transaction.atomic
-def _split_source(source_id: int, draft: AppDraft) -> str:
+def _split_source(source_id: int, draft: AppDraft) -> tuple[str, int | None]:
     source = Source.objects.select_for_update().select_related("app").get(pk=source_id)
     if source.is_primary:
-        return "skipped"
+        return "skipped", None
     sibling_count = Source.objects.filter(
         app_id=source.app_id,
         source_type=Source.SourceType.MCP_REGISTRY,
     ).count()
     if sibling_count <= 1:
-        return "skipped"
+        return "skipped", None
 
     app = App.objects.create(
         name=draft.name,
@@ -145,4 +167,4 @@ def _split_source(source_id: int, draft: AppDraft) -> str:
             "is_active",
         ]
     )
-    return "split"
+    return "split", app.pk
