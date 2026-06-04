@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.catalog.models import App
+from apps.catalog.models import App, Platform
 from apps.sources.base import AppDraft
 from apps.sources.models import DuplicateCandidate, Source
 from apps.sources.upsert import upsert_app_from_draft
@@ -86,6 +86,42 @@ def test_github_repo_identity_attaches_cross_source_match() -> None:
         source_type=Source.SourceType.GITHUB_MCP,
         external_id="github-acme-mcp",
     ).app == existing
+
+
+def test_mcp_registry_same_repo_creates_separate_apps() -> None:
+    Platform.objects.get_or_create(
+        slug="mcp", defaults={"name": "MCP", "public_path": "mcp-servers"}
+    )
+    first = _draft(
+        name="Acme Alpha MCP",
+        slug_hint="acme-alpha-mcp",
+        repo_url="https://github.com/acme/mcp-monorepo",
+        official_page_url="https://github.com/acme/mcp-monorepo",
+        external_id="com.acme/alpha",
+        platforms=["mcp"],
+        listing_types=["mcp-server"],
+    )
+    second = _draft(
+        name="Acme Beta MCP",
+        slug_hint="acme-beta-mcp",
+        repo_url="https://github.com/acme/mcp-monorepo",
+        official_page_url="https://github.com/acme/mcp-monorepo",
+        external_id="com.acme/beta",
+        platforms=["mcp"],
+        listing_types=["mcp-server"],
+    )
+
+    assert upsert_app_from_draft(first, Source.SourceType.MCP_REGISTRY) == "new"
+    assert upsert_app_from_draft(second, Source.SourceType.MCP_REGISTRY) == "new"
+
+    assert App.objects.count() == 2
+    assert Source.objects.get(
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="com.acme/alpha",
+    ).app != Source.objects.get(
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="com.acme/beta",
+    ).app
 
 
 def test_weak_domain_name_match_creates_review_candidate() -> None:

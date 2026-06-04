@@ -335,6 +335,14 @@ docker compose exec -T web python manage.py agent_run \
   --mcp-timeout=180
 ```
 
+Если старый импорт склеил несколько MCP Registry servers из одного
+monorepo в одну карточку, сначала проверить и затем применить repair:
+
+```bash
+docker compose exec -T web python manage.py repair_mcp_registry_splits --dry-run
+docker compose exec -T web python manage.py repair_mcp_registry_splits
+```
+
 ### Direct-ingest источники
 
 После проверки bootstrap-карточек включить регулярное обновление

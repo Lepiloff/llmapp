@@ -256,8 +256,14 @@ def _weak_duplicate_match(draft: AppDraft, candidate: App) -> DuplicateMatch | N
     return None
 
 
-def find_soft_duplicate(draft: AppDraft) -> App | None:
+def find_soft_duplicate(draft: AppDraft, *, source_type: str = "") -> App | None:
     """Look for an existing App that might be the same product."""
+    if source_type == Source.SourceType.MCP_REGISTRY:
+        # MCP Registry's canonical identity is ``server.name``/external_id.
+        # A shared repo or homepage often means "same monorepo/vendor", not
+        # "same server" (e.g. Microsoft WorkIQ, PulseMCP, MCPBundles).
+        return None
+
     for candidate in App.objects.all().only(
         "id", "name", "slug", "developer_url", "official_page_url",
         "install_url", "repo_url",
@@ -269,8 +275,13 @@ def find_soft_duplicate(draft: AppDraft) -> App | None:
     return None
 
 
-def find_duplicate_candidates(draft: AppDraft, *, limit: int = 5) -> list[DuplicateMatch]:
+def find_duplicate_candidates(
+    draft: AppDraft, *, source_type: str = "", limit: int = 5
+) -> list[DuplicateMatch]:
     """Return weaker duplicate signals that should be reviewed by an editor."""
+    if source_type == Source.SourceType.MCP_REGISTRY:
+        return []
+
     matches: list[DuplicateMatch] = []
     for candidate in App.objects.all().only(
         "id", "name", "slug", "developer_url", "official_page_url",
@@ -484,7 +495,7 @@ def upsert_app_from_draft(draft: AppDraft, source_type: str) -> UpsertOutcome:
         attach_platforms(app, draft)
         return "updated"
 
-    soft_dup = find_soft_duplicate(draft)
+    soft_dup = find_soft_duplicate(draft, source_type=source_type)
     if soft_dup is not None:
         Source.objects.create(
             app=soft_dup,
@@ -495,7 +506,7 @@ def upsert_app_from_draft(draft: AppDraft, source_type: str) -> UpsertOutcome:
         )
         return "skipped"
 
-    duplicate_candidates = find_duplicate_candidates(draft)
+    duplicate_candidates = find_duplicate_candidates(draft, source_type=source_type)
     return _create_new_app(
         draft,
         source_type,
