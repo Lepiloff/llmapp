@@ -61,9 +61,21 @@ class MCPRegistrySource(BaseSource):
     KNOWN_SCHEMA_VERSIONS = {"1.0", "1.1"}
     PAGE_SIZE = 100
 
-    def __init__(self, http: requests.Session | None = None) -> None:
+    def __init__(
+        self,
+        http: requests.Session | None = None,
+        *,
+        start_cursor: str | None = None,
+        request_timeout: float | None = None,
+    ) -> None:
         self.base_url: str = settings.MCP_REGISTRY_BASE_URL.rstrip("/")
         self.http = http or self._build_session()
+        self.start_cursor = start_cursor or None
+        self.request_timeout = (
+            request_timeout
+            if request_timeout is not None
+            else float(getattr(settings, "MCP_REGISTRY_TIMEOUT_SECONDS", 90.0) or 90.0)
+        )
         self.unparsed: list[dict] = []
         self.observed_schema_versions: set[str] = set()
 
@@ -92,13 +104,13 @@ class MCPRegistrySource(BaseSource):
     # Iteration
     # ------------------------------------------------------------------
     def iter_drafts(self) -> Iterable[AppDraft]:
-        cursor: str | None = None
+        cursor: str | None = self.start_cursor
         while True:
             try:
                 resp = self.http.get(
                     f"{self.base_url}/servers",
                     params={"cursor": cursor, "limit": self.PAGE_SIZE},
-                    timeout=30,
+                    timeout=self.request_timeout,
                 )
                 resp.raise_for_status()
             except requests.RequestException as exc:

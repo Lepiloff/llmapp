@@ -123,6 +123,8 @@ callout'ы.
 * `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` — иначе `/submit/` обходится скриптами.
 * `EMAIL_HOST` + `EMAIL_HOST_USER` + `EMAIL_HOST_PASSWORD` — для review-digest и budget alerts.
 * `AGENT_REVIEW_DIGEST_EMAILS` / `AGENT_BUDGET_ALERT_EMAILS` / `SUBMISSIONS_NOTIFY_EMAILS`.
+* `MCP_REGISTRY_TIMEOUT_SECONDS=90` и `AGENT_OPENAI_TIMEOUT_SECONDS=90` —
+  дефолты уже такие, но значения стоит держать явно в продовом `.env`.
 
 ### 🟢 Feature flags — выключены по умолчанию
 
@@ -322,6 +324,16 @@ quality gate: фоновые задачи добавляют и обновляю
 
 MCP Registry ingest включён всегда и запускается ежедневно в `04:00 UTC`.
 Остальные источники и re-actualization выключены feature flags'ами.
+
+Если MCP Registry оборвался на upstream timeout, продолжить с cursor из
+лога можно вручную:
+
+```bash
+docker compose exec -T web python manage.py agent_run \
+  --source=mcp_registry --apply \
+  --mcp-start-cursor='io.github.example/server:1.0.0' \
+  --mcp-timeout=180
+```
 
 ### Direct-ingest источники
 

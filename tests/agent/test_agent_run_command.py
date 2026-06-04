@@ -255,3 +255,33 @@ def test_source_chatgpt_apply_invokes_direct_ingest_with_flag_bypass(monkeypatch
     }
     assert "[APPLIED] source=chatgpt_apps" in out.getvalue()
     assert '"new": 1' in out.getvalue()
+
+
+def test_source_mcp_registry_apply_accepts_resume_options(monkeypatch) -> None:
+    from apps.agent.management.commands import agent_run
+
+    called = {}
+
+    def fake_ingest_mcp_registry(*, start_cursor=None, request_timeout=None):
+        called["start_cursor"] = start_cursor
+        called["request_timeout"] = request_timeout
+        return {"new": 0, "updated": 1, "skipped": 0, "failed": 0}
+
+    monkeypatch.setattr(agent_run, "ingest_mcp_registry", fake_ingest_mcp_registry)
+    out = StringIO()
+
+    call_command(
+        "agent_run",
+        "--source=mcp_registry",
+        "--apply",
+        "--mcp-start-cursor=resume-from-here",
+        "--mcp-timeout=123",
+        stdout=out,
+    )
+
+    assert called == {
+        "start_cursor": "resume-from-here",
+        "request_timeout": 123.0,
+    }
+    assert "[APPLIED] source=mcp_registry" in out.getvalue()
+    assert '"updated": 1' in out.getvalue()

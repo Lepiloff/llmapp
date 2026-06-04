@@ -216,6 +216,7 @@ class OpenAIProvider(LLMProvider):
         input_cost_per_1m_tokens: float = 0.0,
         cached_input_cost_per_1m_tokens: float = 0.0,
         output_cost_per_1m_tokens: float = 0.0,
+        timeout: float | None = None,
         max_retries: int = 3,
     ) -> None:
         if not model:
@@ -224,6 +225,7 @@ class OpenAIProvider(LLMProvider):
         self.input_cost_per_1m_tokens = input_cost_per_1m_tokens
         self.cached_input_cost_per_1m_tokens = cached_input_cost_per_1m_tokens
         self.output_cost_per_1m_tokens = output_cost_per_1m_tokens
+        self.timeout = timeout
         self.max_retries = max(1, max_retries)
         if client is not None:
             self.client = client
@@ -236,7 +238,10 @@ class OpenAIProvider(LLMProvider):
                     "Install project dependencies before using "
                     "AGENT_LLM_PROVIDER_PRIMARY=openai."
                 ) from exc
-            self.client = OpenAI(api_key=api_key)
+            kwargs = {"api_key": api_key}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            self.client = OpenAI(**kwargs)
 
     def complete(
         self,
@@ -447,6 +452,9 @@ def _build_openai(settings, role, model, cost_prefix) -> LLMProvider:
         ),
         output_cost_per_1m_tokens=float(
             getattr(settings, f"{cost_prefix}_OUTPUT_COST_PER_1M_TOKENS", 0) or 0
+        ),
+        timeout=float(
+            getattr(settings, "AGENT_OPENAI_TIMEOUT_SECONDS", 90.0) or 90.0
         ),
     )
 

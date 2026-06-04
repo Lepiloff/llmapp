@@ -326,3 +326,26 @@ def test_pagination_follows_metadata_next_cursor() -> None:
     drafts = list(source.iter_drafts())
 
     assert {d.external_id for d in drafts} == {"p1", "p2"}
+
+
+def test_start_cursor_and_timeout_are_used_on_first_page() -> None:
+    session = MagicMock(spec=requests.Session)
+    session.get.return_value = _response(payload={
+        "servers": [{"id": "p1", "name": "P1"}],
+        "metadata": {"count": 1},
+    })
+    source = MCPRegistrySource(
+        http=session,
+        start_cursor="resume-from-here",
+        request_timeout=123.0,
+    )
+
+    drafts = list(source.iter_drafts())
+
+    assert [draft.external_id for draft in drafts] == ["p1"]
+    session.get.assert_called_once()
+    assert session.get.call_args.kwargs["params"] == {
+        "cursor": "resume-from-here",
+        "limit": MCPRegistrySource.PAGE_SIZE,
+    }
+    assert session.get.call_args.kwargs["timeout"] == 123.0

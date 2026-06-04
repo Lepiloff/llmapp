@@ -303,6 +303,7 @@ def _settings_with_prices(**overrides) -> SimpleNamespace:
         "AGENT_OPENAI_CHEAP_INPUT_COST_PER_1M_TOKENS": 0,
         "AGENT_OPENAI_CHEAP_CACHED_COST_PER_1M_TOKENS": 0,
         "AGENT_OPENAI_CHEAP_OUTPUT_COST_PER_1M_TOKENS": 0,
+        "AGENT_OPENAI_TIMEOUT_SECONDS": 90.0,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -350,6 +351,20 @@ def test_build_provider_uses_role_specific_openai_prices() -> None:
     assert cheap.input_cost_per_1m_tokens == 0.20
     assert cheap.cached_input_cost_per_1m_tokens == 0.02
     assert cheap.output_cost_per_1m_tokens == 1.25
+
+
+def test_build_provider_uses_openai_timeout_setting() -> None:
+    settings = _settings_with_prices(
+        AGENT_LLM_PROVIDER_PRIMARY="openai",
+        AGENT_LLM_MODEL_PRIMARY="gpt-mini",
+        OPENAI_API_KEY="test-key",
+        AGENT_OPENAI_TIMEOUT_SECONDS=45.0,
+    )
+
+    provider = build_provider("primary", settings_module=settings)
+
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.timeout == 45.0
 
 
 def test_cost_helpers_tolerate_missing_usage_details() -> None:

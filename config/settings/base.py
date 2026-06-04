@@ -323,6 +323,9 @@ CELERY_BEAT_SCHEDULE = {
 MCP_REGISTRY_BASE_URL = config(
     "MCP_REGISTRY_BASE_URL", default="https://registry.modelcontextprotocol.io/v0"
 )
+MCP_REGISTRY_TIMEOUT_SECONDS = config(
+    "MCP_REGISTRY_TIMEOUT_SECONDS", default=90.0, cast=float
+)
 GEMINI_EXTENSIONS_URL = config(
     "GEMINI_EXTENSIONS_URL", default="https://geminicli.com/extensions.json"
 )
@@ -411,6 +414,9 @@ AGENT_LLM_MODEL_PRIMARY = config("AGENT_LLM_MODEL_PRIMARY", default="")
 AGENT_LLM_MODEL_CHEAP = config("AGENT_LLM_MODEL_CHEAP", default="")
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+AGENT_OPENAI_TIMEOUT_SECONDS = config(
+    "AGENT_OPENAI_TIMEOUT_SECONDS", default=90.0, cast=float
+)
 # Per-role pricing knobs. Primary (full enrichment, e.g. gpt-5.4-mini) and
 # cheap (discovery classification, e.g. gpt-5.4-nano) use different models
 # at different price points, so a single global pair would mis-cost one of

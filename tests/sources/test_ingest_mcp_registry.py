@@ -196,6 +196,27 @@ def test_empty_iteration_does_not_raise(monkeypatch, mcp_platform) -> None:
     assert result == {"new": 0, "updated": 0, "skipped": 0, "failed": 0}
 
 
+def test_resume_options_are_passed_to_source(monkeypatch, mcp_platform) -> None:
+    captured_kwargs = {}
+
+    def build_source(**kwargs):
+        captured_kwargs.update(kwargs)
+        return _FakeSource(drafts=[])
+
+    monkeypatch.setattr(tasks, "MCPRegistrySource", build_source)
+
+    result = tasks.ingest_mcp_registry(
+        start_cursor="resume-from-here",
+        request_timeout=123.0,
+    )
+
+    assert result == {"new": 0, "updated": 0, "skipped": 0, "failed": 0}
+    assert captured_kwargs == {
+        "start_cursor": "resume-from-here",
+        "request_timeout": 123.0,
+    }
+
+
 def test_per_record_upsert_failure_is_isolated(monkeypatch, mcp_platform) -> None:
     good = _make_draft(external_id="good-001", name="GoodOne")
     bad = _make_draft(external_id="bad-001", name="BadOne")

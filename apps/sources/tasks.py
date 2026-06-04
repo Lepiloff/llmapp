@@ -49,7 +49,11 @@ def cleanup_old_link_check_results(days_to_keep: int | None = None) -> dict:
 
 
 @shared_task
-def ingest_mcp_registry() -> dict[str, int]:
+def ingest_mcp_registry(
+    *,
+    start_cursor: str | None = None,
+    request_timeout: float | None = None,
+) -> dict[str, int]:
     """Ingest MCP Registry via MCPRegistrySource + upsert_app_from_draft.
 
     Operational guarantees:
@@ -63,7 +67,12 @@ def ingest_mcp_registry() -> dict[str, int]:
         raising into the worker, so Celery does not enter a retry loop on a
         transient upstream outage — the next beat tick picks it up.
     """
-    source = MCPRegistrySource()
+    source_kwargs = {}
+    if start_cursor:
+        source_kwargs["start_cursor"] = start_cursor
+    if request_timeout is not None:
+        source_kwargs["request_timeout"] = request_timeout
+    source = MCPRegistrySource(**source_kwargs)
     counters = {"new": 0, "updated": 0, "skipped": 0, "failed": 0}
 
     for draft in source.iter_drafts():
@@ -91,6 +100,7 @@ def ingest_mcp_registry() -> dict[str, int]:
             **counters,
             "unparsed": len(source.unparsed),
             "schema_versions": sorted(source.observed_schema_versions),
+            "start_cursor": start_cursor or "",
         },
     )
     return counters

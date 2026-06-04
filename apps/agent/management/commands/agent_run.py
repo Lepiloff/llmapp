@@ -104,6 +104,25 @@ class Command(BaseCommand):
                 "non-MCP DRAFT; never wire this into beat / batch."
             ),
         )
+        parser.add_argument(
+            "--mcp-start-cursor",
+            dest="mcp_start_cursor",
+            default="",
+            help=(
+                "Resume MCP Registry ingest from this cursor. Only applies "
+                "with --source=mcp_registry."
+            ),
+        )
+        parser.add_argument(
+            "--mcp-timeout",
+            dest="mcp_timeout",
+            type=float,
+            default=None,
+            help=(
+                "Per-page MCP Registry request timeout in seconds. Only "
+                "applies with --source=mcp_registry."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         ensure_eager_if_broker_unreachable(self.stderr)
@@ -114,6 +133,8 @@ class Command(BaseCommand):
                 options["source"],
                 limit=options["limit"],
                 dry_run=dry_run,
+                mcp_start_cursor=options.get("mcp_start_cursor") or "",
+                mcp_timeout=options.get("mcp_timeout"),
             )
             header = "[DRY-RUN]" if dry_run else "[APPLIED]"
             self.stdout.write(self.style.SUCCESS(
@@ -185,7 +206,15 @@ class Command(BaseCommand):
         # apply_merge_set inside dry-run.
         EnrichmentTask.objects.filter(pk=outcome.task_id).get()  # raises if not found
 
-    def _run_source(self, source: str, *, limit: int, dry_run: bool) -> dict:
+    def _run_source(
+        self,
+        source: str,
+        *,
+        limit: int,
+        dry_run: bool,
+        mcp_start_cursor: str = "",
+        mcp_timeout: float | None = None,
+    ) -> dict:
         if source == "rss":
             return discover_rss(limit=limit, dry_run=dry_run)
         if source == "github_mcp":
@@ -214,5 +243,8 @@ class Command(BaseCommand):
         if source == "mcp_registry":
             if dry_run:
                 return {"skipped": "mcp_registry_has_no_dry_run", "source": source}
-            return ingest_mcp_registry()
+            return ingest_mcp_registry(
+                start_cursor=mcp_start_cursor or None,
+                request_timeout=mcp_timeout,
+            )
         raise CommandError(f"Unsupported source={source!r}")
