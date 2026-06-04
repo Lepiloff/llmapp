@@ -109,12 +109,15 @@ class AppNotEligibleError(ValueError):
         self.reason = reason
 
 
-# Source types accepted by Phase 1 eligibility. Phase 3+ will extend this
-# tuple as discovery sources (RSS, GitHub, ChatGPT directory, ...) come
-# online; the explicit allowlist forces every new source to be considered
-# rather than silently letting any DRAFT through.
+# Source types accepted by batch enrichment. The explicit allowlist forces
+# every new automated source to be considered rather than silently letting any
+# DRAFT through; manual editor entries and user submissions stay out of
+# scheduled LLM writes.
 _PHASE_1_ELIGIBLE_SOURCE_TYPES: tuple[str, ...] = (
     Source.SourceType.MCP_REGISTRY,
+    Source.SourceType.GEMINI_EXTENSIONS,
+    Source.SourceType.CLAUDE_CONNECTORS,
+    Source.SourceType.CHATGPT_UNOFFICIAL,
 )
 
 
@@ -124,14 +127,11 @@ _PHASE_1_ELIGIBLE_SOURCE_TYPES: tuple[str, ...] = (
 def assert_app_is_eligible(app_id: int, *, allow_non_mcp: bool = False) -> None:
     """Pre-flight check used by ``tasks.run_enrich_existing_draft``.
 
-    Phase 1 invariants:
+    Enrichment invariants:
 
     * ``App.status == DRAFT`` (no agent writes against published / hidden).
-    * App has a ``Source`` of type
-      :class:`apps.sources.models.Source.SourceType.MCP_REGISTRY`. This is
-      the strict reading of the Phase 1 scope from ``docs/agent-pipeline.md``
-      ("existing MCP DRAFT cards"). Phase 3+ will widen the allowlist as
-      discovery sources (RSS, GitHub, ...) come online.
+    * App has an automated import ``Source`` type in
+      ``_PHASE_1_ELIGIBLE_SOURCE_TYPES``.
 
     ``allow_non_mcp`` is an explicit operator override for prompt
     iteration against a card that isn't MCP-sourced — the ``--allow-non-mcp``
@@ -162,7 +162,8 @@ def assert_app_is_eligible(app_id: int, *, allow_non_mcp: bool = False) -> None:
             app_id,
             status,
             reason=(
-                "Phase 1 only enriches apps with an MCP Registry Source. "
+                "Batch enrichment only handles DRAFT apps from automated "
+                "catalog sources. "
                 "Pass --allow-non-mcp to override for prompt iteration."
             ),
         )
@@ -794,9 +795,8 @@ def pending_enrichment_app_ids(limit: int | None = None) -> Iterable[int]:
 
     * ``status == DRAFT`` — agent never touches published / hidden cards.
     * Has a ``Source`` row with ``source_type`` in
-      ``_PHASE_1_ELIGIBLE_SOURCE_TYPES`` (currently only
-      ``MCP_REGISTRY``). DRAFT cards from manual entry or submissions
-      are out of scope until later phases.
+      ``_PHASE_1_ELIGIBLE_SOURCE_TYPES``. DRAFT cards from manual entry
+      or submissions are out of scope.
     * Has not yet been agent-enriched (no ``Source.external_id``
       starting with ``agent-enrich:``).
 

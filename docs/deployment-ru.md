@@ -293,8 +293,18 @@ cd ~/llmapp
 ```
 
 Скрипт запускает MCP Registry v0, Gemini Extensions, Claude Connectors
-и ChatGPT Apps direct-ingest. Они создают `DRAFT`-карточки без
-автопубликации и без OpenAI-вызовов. Результат проверить в:
+и ChatGPT Apps direct-ingest. По умолчанию direct-ingest берёт до 500
+записей на источник; для другого объёма:
+
+```bash
+DIRECT_INGEST_LIMIT=1000 ./scripts/bootstrap_prod_catalog.sh
+GEMINI_EXTENSIONS_LIMIT=250 CLAUDE_CONNECTORS_LIMIT=100 CHATGPT_APPS_LIMIT=100 ./scripts/bootstrap_prod_catalog.sh
+```
+
+Direct-ingest создаёт `DRAFT`-карточки без автопубликации и без
+OpenAI-вызовов. Это базовый слой каталога; после настройки LLM-кредов
+запускается отдельный `enrich_pending` проход по этим DRAFT-карточкам.
+Результат проверить в:
 
 ```text
 /admin/catalog/app/?status__exact=draft
@@ -339,10 +349,14 @@ docker compose restart worker beat
 ```
 
 `github_mcp` и `rss` классифицируют кандидатов дешёвой моделью и
-обогащают релевантные карточки основной моделью. `enrich_pending`
-обрабатывает MCP Registry draft-карточки batch'ами. Beat: GitHub MCP
-Пн/Ср/Пт `06:30 UTC`, pending enrichment ежедневно `06:45 UTC`, RSS
-каждые 6 ч.
+обогащают релевантные карточки основной моделью. Direct-ingest источники
+(`mcp_registry`, `gemini_extensions`, `claude_connectors`, `chatgpt_apps`)
+создают только базовые DRAFT-карточки из доверенных каталогов; после
+добавления LLM-кредов их обрабатывает отдельный `enrich_pending` проход.
+Повторно импортировать локальную БД или пересоздавать карточки для этого
+не нужно: enrichment идёт по уже созданным DRAFT-записям. Beat: GitHub MCP
+Пн/Ср/Пт `06:30 UTC`, pending enrichment ежедневно `06:45 UTC`, RSS каждые
+6 ч.
 
 ### Re-actualization
 

@@ -330,11 +330,38 @@ def test_assert_app_is_eligible_rejects_missing() -> None:
         assert_app_is_eligible(99999999)
 
 
-def test_assert_app_is_eligible_rejects_non_mcp_draft(taxonomy_rows) -> None:
-    """Phase 1 is strictly MCP-registry-sourced DRAFT cards.
+@pytest.mark.parametrize(
+    "source_type",
+    [
+        Source.SourceType.GEMINI_EXTENSIONS,
+        Source.SourceType.CLAUDE_CONNECTORS,
+        Source.SourceType.CHATGPT_UNOFFICIAL,
+    ],
+)
+def test_assert_app_is_eligible_allows_automated_ingest_sources(
+    taxonomy_rows, source_type
+) -> None:
+    app = App.objects.create(
+        name=f"Imported {source_type}",
+        slug=f"imported-{source_type}",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=app,
+        source_type=source_type,
+        external_id=f"{source_type}:{app.pk}",
+    )
+
+    assert_app_is_eligible(app.pk)
+
+
+def test_assert_app_is_eligible_rejects_non_automated_draft(taxonomy_rows) -> None:
+    """Batch enrichment is limited to automated catalog-source DRAFT cards.
 
     A DRAFT manually entered by an editor (no Source, or Source of type
-    other than MCP_REGISTRY) must be rejected by the eligibility check.
+    other than the automated ingest allowlist) must be rejected by the
+    eligibility check.
     """
     app = App.objects.create(
         name="ManuallyEntered",
@@ -345,10 +372,10 @@ def test_assert_app_is_eligible_rejects_non_mcp_draft(taxonomy_rows) -> None:
     # No Source row at all → ineligible.
     with pytest.raises(AppNotEligibleError) as excinfo:
         assert_app_is_eligible(app.pk)
-    assert "MCP Registry Source" in str(excinfo.value)
+    assert "automated catalog sources" in str(excinfo.value)
     assert "--allow-non-mcp" in str(excinfo.value)
 
-    # Even a non-MCP Source (e.g. SUBMISSION) is still ineligible.
+    # Even a non-automated Source (e.g. SUBMISSION) is still ineligible.
     Source.objects.create(
         app=app,
         source_type=Source.SourceType.SUBMISSION,
@@ -390,10 +417,10 @@ def test_allow_non_mcp_override_still_requires_draft_status(
     assert excinfo.value.status == App.AppStatus.PUBLISHED
 
 
-def test_pending_enrichment_app_ids_filters_by_mcp_source(
+def test_pending_enrichment_app_ids_filters_by_automated_source(
     taxonomy_rows,
 ) -> None:
-    """Selector returns only DRAFT apps with an MCP_REGISTRY Source.
+    """Selector returns only DRAFT apps with an automated source.
 
     Manual/submission DRAFT cards must NOT be picked up by batch.
     """
@@ -411,6 +438,18 @@ def test_pending_enrichment_app_ids_filters_by_mcp_source(
         external_id="mcp-registry:from-registry",
     )
 
+    gemini_app = App.objects.create(
+        name="FromGemini",
+        slug="gemini-app",
+        short_description="",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=gemini_app,
+        source_type=Source.SourceType.GEMINI_EXTENSIONS,
+        external_id="gemini:from-gemini",
+    )
+
     manual_app = App.objects.create(
         name="ManualEntry",
         slug="manual-3",
@@ -425,6 +464,7 @@ def test_pending_enrichment_app_ids_filters_by_mcp_source(
 
     pending = list(pending_enrichment_app_ids())
     assert mcp_app.pk in pending
+    assert gemini_app.pk in pending
     assert manual_app.pk not in pending
 
 
