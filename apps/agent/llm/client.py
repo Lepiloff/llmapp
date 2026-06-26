@@ -603,7 +603,7 @@ def _safe_provider_error(exc: Exception) -> str:
     return " ".join(parts)
 
 
-def _openai_wire_schema_for(schema: type[SchemaT]) -> type[BaseModel]:
+def _openai_wire_schema_for[T: BaseModel](schema: type[T]) -> type[BaseModel]:
     if schema.__name__ == "MergeSet":
         return _OpenAIMergeSet
     if schema.__name__ == "EnrichedDraft":
@@ -611,7 +611,7 @@ def _openai_wire_schema_for(schema: type[SchemaT]) -> type[BaseModel]:
     return schema
 
 
-def _coerce_openai_output(parsed: BaseModel, *, target_schema: type[SchemaT]) -> SchemaT:
+def _coerce_openai_output[T: BaseModel](parsed: BaseModel, *, target_schema: type[T]) -> T:
     if isinstance(parsed, target_schema):
         return parsed
     if target_schema.__name__ == "MergeSet" and isinstance(parsed, _OpenAIMergeSet):

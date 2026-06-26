@@ -112,4 +112,4 @@ jobs:
             -e SECRET_KEY=ci-build-smoke \
             --entrypoint python \
             llmmarket-web:ci \
-            -c "import apps.catalog.api, whitenoise.middleware, apps.core.csp; print('runtime imports OK')"
+            -c "import django; django.setup(); import apps.catalog.api, whitenoise.middleware, apps.core.csp; print('runtime imports OK')"
