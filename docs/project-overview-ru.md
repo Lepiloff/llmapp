@@ -154,6 +154,29 @@ end-to-end. Цель — в идеале редактор только нажи�
 в каталог с правильным описанием, категорией, capability-флагами и
 ссылками.
 
+### Production cadence: bootstrap != регулярная актуализация
+
+Первичное наполнение каталога - разовый bootstrap. Дальше расписание
+работает инкрементально:
+
+- Direct-ingest источники (`mcp_registry`, `gemini_extensions`,
+  `claude_connectors`, `chatgpt_apps`) перечитывают внешний источник и
+  пишут через upsert по `Source(source_type, external_id)`. Известные
+  записи обновляются, новые добавляются, LLM не вызывается.
+- `enrich_pending` берёт только DRAFT-карточки без
+  `agent-enrich:<app_id>`. Уже enriched карточки не тратят LLM-бюджет
+  повторно; новые карточки, появившиеся после очередного ingest, попадают
+  в очередь отдельно.
+- Общий `enrich_pending` включает MCP и non-MCP источники. После
+  завершения non-MCP enrichment его нельзя оставлять включённым, если MCP
+  enrichment ещё не одобрен отдельным бюджетом.
+- Re-actualization относится к published-карточкам: refetch источника,
+  LLM diff, затем `NeedsReviewQueueEntry(kind=reactualized)`. App-поля не
+  меняются без редактора.
+
+Технический контракт и operational детали описаны в
+`docs/agent-pipeline.md` → `Production update cadence`.
+
 ### Phase 0 — Ingest из MCP Registry
 
 Источник: официальный MCP Registry (`registry.modelcontextprotocol.io`).

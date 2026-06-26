@@ -293,6 +293,36 @@ Phase 4 re-actualization строится поверх существующег�
   official OpenAI source остаётся отдельным hardening item.
 - Beat: direct-ingest источники gated через `AGENT_SOURCES_ENABLED`.
 
+**Production update cadence:**
+
+- Первичное наполнение каталога - разовый bootstrap. Регулярные задачи не
+  должны повторять тот же объём LLM-работы.
+- Direct-ingest источники (`mcp_registry`, `gemini_extensions`,
+  `claude_connectors`, `chatgpt_apps`) можно запускать по расписанию:
+  они заново читают внешний источник, нормализуют записи в `AppDraft` и
+  пишут через `upsert_app_from_draft`. Дедупликация идёт по
+  `Source(source_type, external_id)`: известные записи обновляются, новые
+  добавляются, карточки не публикуются автоматически. LLM на этом этапе не
+  вызывается.
+- `enrich_pending_drafts_batch` обрабатывает только DRAFT-карточки, у
+  которых ещё нет `Source.external_id = agent-enrich:<app_id>`. Уже
+  enriched карточки не прогоняются повторно; если очередной direct ingest
+  нашёл 20 новых приложений, LLM должен обработать только эти 20.
+- Общий `enrich_pending` selector включает MCP Registry, Gemini, Claude и
+  ChatGPT. После завершения non-MCP enrichment не оставлять
+  `enrich_pending` включённым без отдельного MCP-бюджета или source-scoped
+  batch, иначе следующий beat начнёт расходовать бюджет на MCP Registry.
+- MCP Registry direct ingest разрешён как регулярная сверка без LLM.
+  Полный MCP enrichment - отдельный операторский/бюджетный запуск, а не
+  часть обычной daily актуализации.
+- Discovery источники (`rss`, `github_mcp`) работают малыми batches,
+  дедуплицируют кандидатов по `external_id` и тратят LLM только на новые
+  URL, которые ещё не представлены в `Source`.
+- Re-actualization работает отдельно от enrichment: выбирает только
+  published apps с overdue `Source.last_enriched_at`, refetch-ит источник,
+  считает diff и пишет `NeedsReviewQueueEntry(kind=reactualized)`. Она не
+  повторяет initial population и не делает silent update App-полей.
+
 **Re-actualization:**
 
 - `Source.last_enriched_at` уже есть в модели; re-actualization использует его как cadence marker. Backfill: `last_enriched_at = fetched_at` для существующих.
@@ -488,6 +518,10 @@ docker-compose exec web pytest tests/agent/eval/ --eval
 - После Phase 2 → `AGENT_SOURCES_ENABLED=enrich_pending` (только обогащение существующих).
 - После Phase 3 + production gate (см. выше) → `AGENT_SOURCES_ENABLED=enrich_pending,rss,github_mcp`.
 - После direct-ingest pilot review → добавить `gemini_extensions,claude_connectors,chatgpt_apps`.
+- После non-MCP enrichment review → если MCP enrichment ещё не одобрен
+  отдельным бюджетом, убрать `enrich_pending` из `AGENT_SOURCES_ENABLED`
+  или запускать только source-scoped ручные batches. Общий
+  `enrich_pending` не различает MCP и non-MCP.
 
 ---
 

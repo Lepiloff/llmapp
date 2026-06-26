@@ -318,6 +318,47 @@ admin action'ом `Publish selected (with validation)`. Это намеренн�
 quality gate: фоновые задачи добавляют и обновляют кандидатов
 автоматически, но не публикуют непроверенный контент.
 
+### Production checkpoint — 2026-06-05
+
+Состояние production после первичного bootstrap и ручных applied runs:
+
+- Локальная dev-БД не переносилась; production база была наполнена с нуля.
+- Direct-ingest выполнен по всем текущим платформам/источникам:
+  - `mcp_registry`: 10 915 sources. Сверено с MCP Registry API:
+    `latest=10 915`, `missing=0`, `extra_not_latest=0`.
+  - `gemini_extensions`: 1 050 sources.
+  - `claude_connectors`: 24 sources.
+  - `chatgpt_unofficial`: 293 sources.
+- Каталог содержит 11 952 `draft` карточки. Автопубликации не было.
+- LLM enrichment выполнен только для non-MCP платформ:
+  - Gemini: 764/764 apps enriched, pending=0.
+  - Claude: 24/24 apps enriched, pending=0.
+  - ChatGPT: 288/288 apps enriched, pending=0.
+  - Новых non-MCP enrichment tasks: 1 035 persisted, failures=0.
+  - Non-MCP enrichment cost: `$2.730216`; total monthly LLM cost после
+    прогона: `$2.838061` при бюджете `$20`.
+- MCP Registry enrichment намеренно не выполнялся как полный прогон:
+  - MCP apps: 10 915.
+  - Уже enriched: 35 (ранние pilot/beat/manual runs).
+  - Pending MCP enrichment: 10 880.
+  - Оценка полного MCP enrichment по фактической non-MCP средней цене:
+    около `$28.70`.
+- Review queue после non-MCP enrichment: 1 030 pending proposals. Это не
+  означает публикацию: LLM заполнил безопасные draft-поля и создал
+  предложения для редактора, но `App.status` остался `draft`.
+
+Следующая рабочая точка:
+
+1. Решить, запускать ли полный MCP enrichment отдельным budget-approved
+   batch.
+2. Если MCP enrichment пока не запускаем, убрать `enrich_pending` из
+   `AGENT_SOURCES_ENABLED` или заменить общий beat на source-scoped ручные
+   batches: общий selector включает MCP и начнёт тратить бюджет на MCP
+   после того как non-MCP pending=0.
+3. После решения по MCP переходить к проверке scheduled scripts:
+   direct-ingest cadence, budget alerts, re-actualization dry-run/limited
+   applied run.
+
 ---
 
 ## Включение background-задач
