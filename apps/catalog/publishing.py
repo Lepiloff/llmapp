@@ -253,6 +253,8 @@ def apply_autopublish_decision(
 
 def _base_publish_blockers(app: App) -> list[str]:
     blockers: list[str] = []
+    if app.sources.filter(source_type=Source.SourceType.MCP_REGISTRY).exists():
+        blockers.append("mcp_source_requires_include_mcp")
     if len(app.short_description or "") < 60:
         blockers.append("short_description_lt_60")
     if not (app.long_description or "").strip():

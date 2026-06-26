@@ -169,6 +169,25 @@ def test_autopublish_blocks_pending_duplicate_candidate() -> None:
     assert "pending_duplicate_candidate" in decision.blockers
 
 
+def test_autopublish_blocks_mixed_mcp_source_without_mcp_opt_in() -> None:
+    app = _candidate_app()
+    _review_entry(app)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp:acme-helper",
+        source_url="https://registry.modelcontextprotocol.io/acme-helper",
+    )
+
+    decision = evaluate_autopublish_candidate(
+        app,
+        source_types=(Source.SourceType.GEMINI_EXTENSIONS,),
+    )
+
+    assert decision.would_publish is False
+    assert "mcp_source_requires_include_mcp" in decision.blockers
+
+
 def test_autopublish_command_requires_explicit_mcp_opt_in() -> None:
     out = StringIO()
 

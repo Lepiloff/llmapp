@@ -135,3 +135,14 @@ Expected validation after deploy:
 - apply run publishes only the candidates that passed the dry-run policy;
 - published pages appear in UI/API/sitemap;
 - no LLM calls are created by the autopublish command.
+
+Production dry-run on commit `4738ab2`:
+
+- `LLMCallLog`: `1287 -> 1287`, no LLM calls.
+- Evaluated non-MCP candidates: `1064`.
+- Initial `would_publish`: `1`.
+- The single candidate was `Lucid`, but inspection showed it had both
+  `chatgpt_unofficial` and `mcp_registry` sources and `mcp-server` listing
+  type. Apply was not run.
+- Follow-up safety fix: non-MCP autopublish now blocks any app that already
+  has an `mcp_registry` source unless MCP is explicitly opted in.
