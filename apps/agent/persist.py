@@ -788,7 +788,11 @@ def record_llm_call(task: EnrichmentTask, meta) -> LLMCallLog:
     )
 
 
-def pending_enrichment_app_ids(limit: int | None = None) -> Iterable[int]:
+def pending_enrichment_app_ids(
+    limit: int | None = None,
+    *,
+    source_types: Iterable[str] | None = None,
+) -> Iterable[int]:
     """Phase 1 batch selector.
 
     Returns app PKs eligible for ``enrich_existing_draft``:
@@ -803,10 +807,11 @@ def pending_enrichment_app_ids(limit: int | None = None) -> Iterable[int]:
     Used by ``enrich_pending_drafts_batch`` and by the management
     command's ``--enrich-pending`` flag.
     """
+    eligible_source_types = tuple(source_types or _PHASE_1_ELIGIBLE_SOURCE_TYPES)
     qs = (
         App.objects.filter(
             status=App.AppStatus.DRAFT,
-            sources__source_type__in=_PHASE_1_ELIGIBLE_SOURCE_TYPES,
+            sources__source_type__in=eligible_source_types,
         )
         .exclude(
             sources__external_id__startswith="agent-enrich:",

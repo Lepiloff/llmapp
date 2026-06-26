@@ -130,6 +130,11 @@ callout'ы.
 
 * `AGENT_SOURCES_ENABLED=` — discovery off. Полный список:
   `gemini_extensions,claude_connectors,chatgpt_apps,github_mcp,rss,enrich_pending`.
+* `AGENT_ENRICH_PENDING_SOURCE_TYPES=gemini_extensions,claude_connectors,chatgpt_unofficial`
+  — allowlist для scheduled `enrich_pending`. По умолчанию MCP Registry
+  исключён, чтобы после non-MCP enrichment beat не начал расходовать
+  бюджет на большой MCP backlog. Для budget-approved MCP batch явно
+  поставить `all` или список с `mcp_registry`.
 * `AGENT_REACTUALIZATION_ENABLED=False`.
 * `AGENT_RATE_LIMIT_RPS_PER_DOMAIN=1.0` — enforced cross-process через Redis.
 
@@ -351,10 +356,12 @@ quality gate: фоновые задачи добавляют и обновляю
 
 1. Решить, запускать ли полный MCP enrichment отдельным budget-approved
    batch.
-2. Если MCP enrichment пока не запускаем, убрать `enrich_pending` из
-   `AGENT_SOURCES_ENABLED` или заменить общий beat на source-scoped ручные
-   batches: общий selector включает MCP и начнёт тратить бюджет на MCP
-   после того как non-MCP pending=0.
+2. Если MCP enrichment пока не запускаем, оставить
+   `AGENT_ENRICH_PENDING_SOURCE_TYPES` без `mcp_registry` (default:
+   `gemini_extensions,claude_connectors,chatgpt_unofficial`) или убрать
+   `enrich_pending` из `AGENT_SOURCES_ENABLED`. MCP включать только
+   отдельным budget-approved opt-in: `AGENT_ENRICH_PENDING_SOURCE_TYPES=all`
+   или явный список с `mcp_registry`.
 3. После решения по MCP переходить к проверке scheduled scripts:
    direct-ingest cadence, budget alerts, re-actualization dry-run/limited
    applied run.

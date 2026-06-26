@@ -18,6 +18,7 @@ from io import StringIO
 import pytest
 
 from django.core.management import call_command
+from django.test import override_settings
 
 from apps.agent.llm import client as agent_client
 from apps.agent.llm.schemas import CapabilityProposal, MergeSet
@@ -112,6 +113,44 @@ def test_unknown_slug_raises(patched_provider) -> None:
     from django.core.management.base import CommandError
     with pytest.raises(CommandError):
         call_command("agent_run", "--enrich-app=does-not-exist")
+
+
+@override_settings(AGENT_ENRICH_PENDING_SOURCE_TYPES=["gemini_extensions"])
+def test_enrich_pending_command_uses_source_type_allowlist(monkeypatch) -> None:
+    from apps.agent.management.commands.agent_run import Command
+    from apps.sources.models import Source
+
+    mcp_app = App.objects.create(
+        name="MCP Pending",
+        slug="mcp-pending-command",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=mcp_app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp-registry:mcp-pending-command",
+    )
+    gemini_app = App.objects.create(
+        name="Gemini Pending",
+        slug="gemini-pending-command",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=gemini_app,
+        source_type=Source.SourceType.GEMINI_EXTENSIONS,
+        external_id="gemini:gemini-pending-command",
+    )
+
+    processed: list[int] = []
+
+    def fake_process_one(self, app_id, *, dry_run, allow_non_mcp):
+        processed.append(app_id)
+
+    monkeypatch.setattr(Command, "_process_one", fake_process_one)
+
+    call_command("agent_run", "--enrich-pending", "--limit=10", stdout=StringIO())
+
+    assert processed == [gemini_app.pk]
 
 
 def test_published_app_is_rejected_with_command_error(

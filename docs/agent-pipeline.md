@@ -308,10 +308,13 @@ Phase 4 re-actualization строится поверх существующег�
   которых ещё нет `Source.external_id = agent-enrich:<app_id>`. Уже
   enriched карточки не прогоняются повторно; если очередной direct ingest
   нашёл 20 новых приложений, LLM должен обработать только эти 20.
-- Общий `enrich_pending` selector включает MCP Registry, Gemini, Claude и
-  ChatGPT. После завершения non-MCP enrichment не оставлять
-  `enrich_pending` включённым без отдельного MCP-бюджета или source-scoped
-  batch, иначе следующий beat начнёт расходовать бюджет на MCP Registry.
+- Scheduled `enrich_pending` selector дополнительно ограничен
+  `AGENT_ENRICH_PENDING_SOURCE_TYPES`. Default:
+  `gemini_extensions,claude_connectors,chatgpt_unofficial`, то есть после
+  завершения non-MCP enrichment beat не переходит на MCP Registry без
+  отдельного opt-in. Для budget-approved MCP batch поставить
+  `AGENT_ENRICH_PENDING_SOURCE_TYPES=all` или явный список с
+  `mcp_registry`.
 - MCP Registry direct ingest разрешён как регулярная сверка без LLM.
   Полный MCP enrichment - отдельный операторский/бюджетный запуск, а не
   часть обычной daily актуализации.
@@ -519,9 +522,9 @@ docker-compose exec web pytest tests/agent/eval/ --eval
 - После Phase 3 + production gate (см. выше) → `AGENT_SOURCES_ENABLED=enrich_pending,rss,github_mcp`.
 - После direct-ingest pilot review → добавить `gemini_extensions,claude_connectors,chatgpt_apps`.
 - После non-MCP enrichment review → если MCP enrichment ещё не одобрен
-  отдельным бюджетом, убрать `enrich_pending` из `AGENT_SOURCES_ENABLED`
-  или запускать только source-scoped ручные batches. Общий
-  `enrich_pending` не различает MCP и non-MCP.
+  отдельным бюджетом, оставить `AGENT_ENRICH_PENDING_SOURCE_TYPES` без
+  `mcp_registry` или убрать `enrich_pending` из `AGENT_SOURCES_ENABLED`.
+  MCP включать только явным opt-in (`all` или список с `mcp_registry`).
 
 ---
 

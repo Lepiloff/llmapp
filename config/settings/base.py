@@ -466,6 +466,16 @@ AGENT_RATE_LIMIT_RPS_PER_DOMAIN = config(
 AGENT_SOURCES_ENABLED = config(
     "AGENT_SOURCES_ENABLED", default="", cast=Csv()
 ) or []
+
+# Source-type allowlist for the scheduled ``enrich_pending`` batch.
+# Default excludes MCP Registry so finishing non-MCP enrichment cannot
+# accidentally roll into the much larger MCP backlog. Use "all" only for a
+# budget-approved MCP enrichment run.
+AGENT_ENRICH_PENDING_SOURCE_TYPES = config(
+    "AGENT_ENRICH_PENDING_SOURCE_TYPES",
+    default="gemini_extensions,claude_connectors,chatgpt_unofficial",
+    cast=Csv(),
+) or []
 GITHUB_TOKEN = config("GITHUB_TOKEN", default="")
 
 # Phase 4 re-actualization cadence. Apps whose freshest re-actualizable

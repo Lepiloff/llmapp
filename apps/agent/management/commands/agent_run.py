@@ -7,7 +7,8 @@ Supported modes:
   ``status='draft'``; otherwise the command errors out (Phase 1
   invariant — see ``apps.agent.persist.assert_app_is_eligible``).
 * ``--enrich-pending [--limit N]`` — walk the same selector beat
-  would: DRAFT cards not yet agent-enriched, newest first.
+  would: DRAFT cards not yet agent-enriched, newest first, constrained
+  by ``AGENT_ENRICH_PENDING_SOURCE_TYPES``.
 * ``--source=rss|github_mcp|gemini_extensions|claude_connectors|chatgpt_apps|
   mcp_registry [--limit N]`` — run discovery/direct-ingest sources manually.
 
@@ -36,6 +37,7 @@ from apps.agent.management._broker_probe import ensure_eager_if_broker_unreachab
 from apps.agent.models import AgentRun, EnrichmentTask
 from apps.agent.persist import AppNotEligibleError, pending_enrichment_app_ids
 from apps.agent.tasks import (
+    _enrich_pending_source_types,
     discover_github_mcp,
     discover_rss,
     ingest_chatgpt_apps,
@@ -149,11 +151,16 @@ class Command(BaseCommand):
             # --enrich-pending always uses the strict Phase 1 selector.
             # --allow-non-mcp has no effect in batch mode (by design —
             # would mask source-type bugs at scale).
-            app_ids = list(pending_enrichment_app_ids(limit=options["limit"]))
+            app_ids = list(
+                pending_enrichment_app_ids(
+                    limit=options["limit"],
+                    source_types=_enrich_pending_source_types(),
+                )
+            )
             allow_non_mcp = False
             if not app_ids:
                 self.stdout.write(self.style.NOTICE(
-                    "No pending MCP-source DRAFT cards to enrich — "
+                    "No pending automated-source DRAFT cards to enrich — "
                     "nothing to do."
                 ))
                 return

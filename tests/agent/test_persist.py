@@ -467,6 +467,13 @@ def test_pending_enrichment_app_ids_filters_by_automated_source(
     assert gemini_app.pk in pending
     assert manual_app.pk not in pending
 
+    gemini_only = list(
+        pending_enrichment_app_ids(
+            source_types=[Source.SourceType.GEMINI_EXTENSIONS],
+        )
+    )
+    assert gemini_only == [gemini_app.pk]
+
 
 def test_apply_merge_set_refuses_published_under_lock(draft_app) -> None:
     """Defense-in-depth: even if the upstream guard is bypassed, the persist

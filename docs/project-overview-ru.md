@@ -167,9 +167,12 @@ end-to-end. Цель — в идеале редактор только нажи�
   `agent-enrich:<app_id>`. Уже enriched карточки не тратят LLM-бюджет
   повторно; новые карточки, появившиеся после очередного ingest, попадают
   в очередь отдельно.
-- Общий `enrich_pending` включает MCP и non-MCP источники. После
-  завершения non-MCP enrichment его нельзя оставлять включённым, если MCP
-  enrichment ещё не одобрен отдельным бюджетом.
+- Scheduled `enrich_pending` дополнительно ограничен
+  `AGENT_ENRICH_PENDING_SOURCE_TYPES`. Default:
+  `gemini_extensions,claude_connectors,chatgpt_unofficial`, то есть MCP
+  Registry не берётся без отдельного opt-in. Для budget-approved MCP
+  enrichment поставить `AGENT_ENRICH_PENDING_SOURCE_TYPES=all` или список
+  с `mcp_registry`.
 - Re-actualization относится к published-карточкам: refetch источника,
   LLM diff, затем `NeedsReviewQueueEntry(kind=reactualized)`. App-поля не
   меняются без редактора.

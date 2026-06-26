@@ -84,6 +84,12 @@ SOURCE_FLAG_GEMINI_EXTENSIONS = "gemini_extensions"
 SOURCE_FLAG_CLAUDE_CONNECTORS = "claude_connectors"
 SOURCE_FLAG_CHATGPT_APPS = "chatgpt_apps"
 
+_DEFAULT_ENRICH_PENDING_SOURCE_TYPES: tuple[str, ...] = (
+    Source.SourceType.GEMINI_EXTENSIONS,
+    Source.SourceType.CLAUDE_CONNECTORS,
+    Source.SourceType.CHATGPT_UNOFFICIAL,
+)
+
 
 def _fetcher_for_url(url: str) -> "Callable[[str], FetchResult]":
     """Pick a URL fetcher by host.
@@ -419,6 +425,7 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
     if not dry_run and is_discovery_disabled():
         return {"skipped": "budget_threshold", "source": SOURCE_FLAG_ENRICH_PENDING}
 
+    source_types = _enrich_pending_source_types()
     run = AgentRun.objects.create(
         source_type="agent_enrich_batch",
         status=(
@@ -427,10 +434,18 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
         trigger=AgentRun.Trigger.BEAT,
     )
 
-    counters = {"processed": 0, "failed": 0, "queued": 0}
+    counters = {
+        "processed": 0,
+        "failed": 0,
+        "queued": 0,
+        "source_types": list(source_types) if source_types is not None else ["all"],
+    }
     total_cost = 0.0
     try:
-        app_ids = pending_enrichment_app_ids(limit=limit)
+        app_ids = pending_enrichment_app_ids(
+            limit=limit,
+            source_types=source_types,
+        )
         for app_id in app_ids:
             try:
                 outcome = run_enrich_existing_draft(
@@ -464,6 +479,25 @@ def enrich_pending_drafts_batch(limit: int = 10, *, dry_run: bool = False) -> di
 
 def _source_enabled(flag: str) -> bool:
     return flag in set(getattr(settings, "AGENT_SOURCES_ENABLED", []) or [])
+
+
+def _enrich_pending_source_types() -> tuple[str, ...] | None:
+    """Source types scheduled pending enrichment is allowed to process.
+
+    Production intentionally defaults to non-MCP sources. MCP Registry has a
+    much larger pending backlog and should be pulled in only by explicitly
+    setting ``AGENT_ENRICH_PENDING_SOURCE_TYPES=all`` or listing
+    ``mcp_registry`` after budget approval.
+    """
+    configured = getattr(
+        settings,
+        "AGENT_ENRICH_PENDING_SOURCE_TYPES",
+        _DEFAULT_ENRICH_PENDING_SOURCE_TYPES,
+    ) or _DEFAULT_ENRICH_PENDING_SOURCE_TYPES
+    normalized = tuple(str(item).strip() for item in configured if str(item).strip())
+    if any(item.lower() == "all" for item in normalized):
+        return None
+    return normalized
 
 
 def _record_discovery(

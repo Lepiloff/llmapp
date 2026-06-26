@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from django.test import override_settings
@@ -169,6 +171,62 @@ def test_pending_enrichment_apply_is_feature_flag_guarded() -> None:
 
     assert result == {"skipped": "source_disabled", "source": "enrich_pending"}
     assert not AgentRun.objects.exists()
+
+
+@override_settings(
+    AGENT_SOURCES_ENABLED=["enrich_pending"],
+    AGENT_ENRICH_PENDING_SOURCE_TYPES=["gemini_extensions"],
+)
+def test_pending_enrichment_batch_uses_source_type_allowlist(monkeypatch) -> None:
+    mcp_app = App.objects.create(
+        name="MCP Pending",
+        slug="mcp-pending",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=mcp_app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp-registry:mcp-pending",
+    )
+    gemini_app = App.objects.create(
+        name="Gemini Pending",
+        slug="gemini-pending",
+        status=App.AppStatus.DRAFT,
+    )
+    Source.objects.create(
+        app=gemini_app,
+        source_type=Source.SourceType.GEMINI_EXTENSIONS,
+        external_id="gemini:gemini-pending",
+    )
+
+    from apps.agent import tasks as agent_tasks
+
+    processed: list[int] = []
+
+    def fake_run_enrich_existing_draft(app_id, *, dry_run, run):
+        processed.append(app_id)
+        return SimpleNamespace(
+            result=SimpleNamespace(
+                call_meta=SimpleNamespace(cost_usd=0),
+            ),
+            persist=SimpleNamespace(queue_entry_id=None),
+        )
+
+    monkeypatch.setattr(
+        agent_tasks,
+        "run_enrich_existing_draft",
+        fake_run_enrich_existing_draft,
+    )
+
+    result = enrich_pending_drafts_batch(limit=10)
+
+    assert processed == [gemini_app.pk]
+    assert result == {
+        "processed": 1,
+        "failed": 0,
+        "queued": 0,
+        "source_types": ["gemini_extensions"],
+    }
 
 
 @override_settings(AGENT_SOURCES_ENABLED=["github_mcp"])
