@@ -3,11 +3,27 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 import psycopg
 
 LOCK_ID = 4_832_319_441
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def ensure_django_setup() -> None:
+    project_root = str(PROJECT_ROOT)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
+    import django
+    from django.apps import apps
+
+    if not apps.ready:
+        django.setup()
 
 
 def run_manage(*args: str) -> None:
@@ -22,10 +38,7 @@ def create_superuser_if_configured() -> None:
         print("Skipping superuser bootstrap (DJANGO_SUPERUSER_* env vars not set).")
         return
 
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
-    import django
-
-    django.setup()
+    ensure_django_setup()
 
     from django.contrib.auth import get_user_model
 
@@ -49,10 +62,7 @@ def configure_site_domain() -> None:
     settings.SITE_BASE_URL. A fresh DB starts with example.com, which would
     leak into sitemap.xml unless we normalize it during container bootstrap.
     """
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
-    import django
-
-    django.setup()
+    ensure_django_setup()
 
     from django.conf import settings
     from django.contrib.sites.models import Site
