@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -41,6 +42,34 @@ def create_superuser_if_configured() -> None:
     print(f"Created superuser {username!r}.")
 
 
+def configure_site_domain() -> None:
+    """Keep django.contrib.sites aligned with SITE_BASE_URL.
+
+    Django's sitemap framework uses the Sites table, not only
+    settings.SITE_BASE_URL. A fresh DB starts with example.com, which would
+    leak into sitemap.xml unless we normalize it during container bootstrap.
+    """
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
+    import django
+
+    django.setup()
+
+    from django.conf import settings
+    from django.contrib.sites.models import Site
+
+    parsed = urlparse(settings.SITE_BASE_URL)
+    domain = parsed.netloc or parsed.path
+    if not domain:
+        print("SITE_BASE_URL has no domain; skipping django_site update.")
+        return
+
+    Site.objects.update_or_create(
+        id=settings.SITE_ID,
+        defaults={"domain": domain, "name": settings.SITE_NAME},
+    )
+    print(f"Configured django_site #{settings.SITE_ID}: {domain}")
+
+
 def main() -> None:
     database_url = os.environ["DATABASE_URL"]
     with psycopg.connect(database_url, autocommit=True) as connection:
@@ -53,6 +82,7 @@ def main() -> None:
                 cursor.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
                 run_manage("migrate", "--noinput")
                 run_manage("seed_demo")
+                configure_site_domain()
                 create_superuser_if_configured()
             finally:
                 cursor.execute("SELECT pg_advisory_unlock(%s)", (LOCK_ID,))
