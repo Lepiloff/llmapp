@@ -91,3 +91,47 @@ Conclusion:
 - Non-MCP direct-ingest found 2 genuinely new entries in the first 10-record
   pilot.
 
+## Stage 5 — editorial automation policy implementation
+
+Implemented a conservative non-MCP autopublish command:
+
+```bash
+python manage.py autopublish_candidates --limit 100
+```
+
+Default behavior is dry-run. It evaluates draft apps from:
+
+- `gemini_extensions`
+- `claude_connectors`
+- `chatgpt_unofficial`
+
+Safety rules:
+
+- MCP is excluded unless the operator passes both
+  `--source-type=mcp_registry` and `--include-mcp`.
+- Final publication still goes through
+  `apps.catalog.services.transition_to_published`.
+- Pending duplicate candidates block publication.
+- Pending review entries block publication unless the entry is a safe
+  enrichment proposal:
+  - no skipped field/capability updates;
+  - no deprecated launch status;
+  - no overwrite of non-empty editorial fields;
+  - high-information verdict only;
+  - no conflicting proposals across multiple pending entries.
+- The command may auto-resolve safe enrichment entries, set
+  `editorial_review_status=reviewed`, and publish only with explicit
+  `--apply`.
+
+Pilot apply shape:
+
+```bash
+python manage.py autopublish_candidates --limit 25 --apply
+```
+
+Expected validation after deploy:
+
+- dry-run report has `evaluated`, `would_publish`, `blocker_counts`;
+- apply run publishes only the candidates that passed the dry-run policy;
+- published pages appear in UI/API/sitemap;
+- no LLM calls are created by the autopublish command.
