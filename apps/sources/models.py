@@ -186,6 +186,10 @@ class LinkCheckResult(models.Model):
             models.Index(fields=["-checked_at"]),
         ]
 
+    def __str__(self) -> str:
+        status = self.status_code if self.status_code is not None else "error"
+        return f"{self.app_id}:{self.target}:{status}"
+
 
 class LinkHealth(models.Model):
     """Rolling summary per (app, target) — drives auto-deprecate."""

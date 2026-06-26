@@ -1,8 +1,8 @@
 """Production settings — strict HTTPS, narrow allowlists, no debug."""
 from __future__ import annotations
 
-from django.core.exceptions import ImproperlyConfigured
 from decouple import Csv, config
+from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401,F403
 from .base import MIDDLEWARE  # noqa: F401  - re-imported so we can mutate it below

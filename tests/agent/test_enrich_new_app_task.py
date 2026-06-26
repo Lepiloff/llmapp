@@ -15,7 +15,6 @@ from apps.agent.tasks import run_enrich_new_app
 from apps.catalog.models import App, AppCapability, Capability, Category, ListingType, Platform
 from apps.sources.models import Source
 
-
 pytestmark = pytest.mark.django_db
 
 

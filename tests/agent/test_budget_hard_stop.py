@@ -48,7 +48,6 @@ from apps.agent.tasks import (
     run_reactualize_app,
 )
 
-
 pytestmark = pytest.mark.django_db
 
 

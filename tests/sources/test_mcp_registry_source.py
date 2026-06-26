@@ -15,11 +15,10 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
 import requests
 
 from apps.sources.base import AppDraft
-from apps.sources.mcp_registry import MCPRegistrySchemaError, MCPRegistrySource
+from apps.sources.mcp_registry import MCPRegistrySource
 
 
 def _response(payload=None, *, raise_on_status: Exception | None = None,

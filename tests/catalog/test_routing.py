@@ -11,7 +11,6 @@ from django.test import Client
 
 from apps.catalog.models import App, Category
 
-
 pytestmark = pytest.mark.django_db
 
 

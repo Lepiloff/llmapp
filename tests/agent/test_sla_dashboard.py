@@ -13,7 +13,6 @@ from apps.agent.admin import SLA_PENDING_DAYS
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.catalog.models import App
 
-
 pytestmark = pytest.mark.django_db
 
 

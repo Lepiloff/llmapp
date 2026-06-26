@@ -19,8 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from apps.agent.llm.schemas import AppSnapshot, CapabilityProposal, MergeSet
-
+from apps.agent.llm.schemas import AppSnapshot, MergeSet
 
 # Keys that are filled only if the App currently has an empty string in
 # the matching attribute. Listed explicitly (not derived) so a future

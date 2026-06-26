@@ -7,7 +7,6 @@ Architecture refs:
 from __future__ import annotations
 
 from django.db import models
-from django.utils import timezone
 
 from apps.core.models import TimeStampedModel
 

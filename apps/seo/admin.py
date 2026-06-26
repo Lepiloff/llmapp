@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import SeoPage, Redirect
+from .models import Redirect, SeoPage
 
 
 @admin.register(SeoPage)

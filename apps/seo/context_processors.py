@@ -1,14 +1,15 @@
 """SEO context processors."""
 from __future__ import annotations
 
-from typing import Dict, Any
-from django.http import HttpRequest
+from typing import Any
+
 from django.conf import settings
+from django.http import HttpRequest
 
 from .structured_data import generate_organization_json_ld, generate_website_json_ld
 
 
-def seo_meta(request: HttpRequest) -> Dict[str, Any]:
+def seo_meta(request: HttpRequest) -> dict[str, Any]:
     """Add SEO metadata to template context."""
     return {
         'seo_meta': {

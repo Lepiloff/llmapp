@@ -7,13 +7,12 @@ Architecture refs:
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
 
 from django.core.validators import EmailValidator
 from django.db import models
 from django.db.models import TextChoices
-from django.utils import timezone
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.core.models import TimeStampedModel
 
@@ -186,6 +185,9 @@ class IssueApp(models.Model):
     class Meta:
         unique_together = ("issue", "app")
         ordering = ["sort_order", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.issue} -> {self.app}"
 
 
 class EmailClick(TimeStampedModel):

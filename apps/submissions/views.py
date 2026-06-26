@@ -13,7 +13,6 @@ from django_ratelimit.decorators import ratelimit
 from apps.catalog.models import App
 
 from .forms import ClaimRequestForm, SubmissionForm
-from .models import ClaimRequest, Submission
 
 
 def get_client_ip(request: HttpRequest) -> str:

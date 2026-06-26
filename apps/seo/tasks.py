@@ -6,7 +6,6 @@ Architecture refs:
 from __future__ import annotations
 
 import logging
-from django.core.management import call_command
 
 from celery import shared_task
 
@@ -69,6 +68,7 @@ def ping_search_engines() -> dict:
     Notifies Google and Bing that the sitemap has been updated.
     """
     import urllib.request
+
     from django.conf import settings
 
     sitemap_url = f"{settings.SITE_BASE_URL}/sitemap.xml"
@@ -103,7 +103,8 @@ def generate_seo_reports() -> dict:
 
     Analyzes the site for common SEO issues and generates reports.
     """
-    from django.db.models import Q, Count
+    from django.db.models import Count, Q
+
     from apps.catalog.models import App
     from apps.editorial.models import Post
 

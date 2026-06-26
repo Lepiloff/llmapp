@@ -8,7 +8,6 @@ from django.core.management import call_command
 from apps.catalog.models import App, AppPlatform, Platform
 from apps.sources.models import Source
 
-
 pytestmark = pytest.mark.django_db
 
 

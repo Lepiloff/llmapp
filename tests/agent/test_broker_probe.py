@@ -12,11 +12,9 @@ The probe behavior to pin:
 """
 from __future__ import annotations
 
-import socket
 from io import StringIO
 from unittest.mock import patch
 
-import pytest
 from django.test import override_settings
 
 from apps.agent.management._broker_probe import (

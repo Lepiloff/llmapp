@@ -25,7 +25,11 @@ from apps.catalog.models import App
 from apps.catalog.services import recalc_quality_score, transition_to_published
 
 from .models import (
-    AgentRun, BudgetMonthState, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry,
+    AgentRun,
+    BudgetMonthState,
+    EnrichmentTask,
+    LLMCallLog,
+    NeedsReviewQueueEntry,
 )
 
 
@@ -263,7 +267,6 @@ class NeedsReviewQueueEntryAdmin(admin.ModelAdmin):
         hand. The view is intentionally compact — one short SQL
         round-trip per panel.
         """
-        from django.db.models import F
 
         sla_days = _sla_pending_days()
         now = timezone.now()

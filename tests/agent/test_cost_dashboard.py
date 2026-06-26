@@ -1,7 +1,6 @@
 """Admin cost-dashboard renderability + aggregate correctness."""
 from __future__ import annotations
 
-from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,7 +16,6 @@ from apps.agent.models import (
     EnrichmentTask,
     LLMCallLog,
 )
-
 
 pytestmark = pytest.mark.django_db
 

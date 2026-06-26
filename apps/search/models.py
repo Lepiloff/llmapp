@@ -6,9 +6,8 @@ Architecture refs:
 """
 from __future__ import annotations
 
-from django.db import models
-from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.contrib.postgres.indexes import GinIndex
+from django.db import models
 
 from apps.core.models import TimeStampedModel
 

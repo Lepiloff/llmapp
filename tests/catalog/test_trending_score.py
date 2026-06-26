@@ -12,7 +12,6 @@ import pytest
 from apps.analytics.models import TrendingScore
 from apps.catalog.models import App
 
-
 pytestmark = pytest.mark.django_db
 
 
@@ -56,8 +55,8 @@ def test_trending_window_selects_correct_field() -> None:
 
 def test_apps_without_score_fall_back_to_quality() -> None:
     """No TrendingScore row → treated as 0.0, sorted by quality_score."""
-    high_q = _make_app("hi-quality", quality=90)
-    low_q = _make_app("lo-quality", quality=20)
+    _make_app("hi-quality", quality=90)
+    _make_app("lo-quality", quality=20)
     # Neither has a TrendingScore row → both 0.0 → quality breaks the tie.
 
     order = list(App.published.all().trending().values_list("slug", flat=True))
@@ -67,7 +66,7 @@ def test_apps_without_score_fall_back_to_quality() -> None:
 def test_score_outweighs_quality() -> None:
     """An app with score=0 must rank below an app with score>0 even
     when its quality_score is higher."""
-    high_q = _make_app("hi-quality", quality=90)
+    _make_app("hi-quality", quality=90)
     trending = _make_app("trending-card", quality=20)
     TrendingScore.objects.create(app=trending, score_7d=5.0)
 

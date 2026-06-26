@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse, Http404
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.cache import cache_page
 
-from .models import Post, Collection, Comparison, Tag
+from .models import Collection, Comparison, Post, Tag
 
 
 @cache_page(60 * 30, key_prefix="blog_index_v1")

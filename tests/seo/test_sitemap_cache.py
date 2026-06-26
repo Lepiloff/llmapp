@@ -12,7 +12,6 @@ from apps.seo.tasks import (
     rebuild_sitemap,
 )
 
-
 # Force a local-memory cache so tests don't depend on the host being able
 # to resolve the docker-only `redis` hostname (the default django-redis
 # backend silently no-ops on connection failure, which would mask bugs).
@@ -38,7 +37,6 @@ def test_sitemap_cached_between_requests(client) -> None:
     # First call renders the sitemap.
     response_1 = client.get("/sitemap.xml")
     assert response_1.status_code == 200
-    body_1 = response_1.content
 
     # Insert a new published app *without* purging the cache. We do it via
     # Manager.create() and then bypass the post_save signal effect by

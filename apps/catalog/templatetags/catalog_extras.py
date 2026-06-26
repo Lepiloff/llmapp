@@ -6,7 +6,6 @@ query parameters so paginated or filter-suffixed URLs don't fragment SEO.
 from __future__ import annotations
 
 from django import template
-from django.utils.http import urlencode
 
 register = template.Library()
 

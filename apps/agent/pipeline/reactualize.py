@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 
 from apps.agent.llm.schemas import AppSnapshot, EnrichedDraft
 
-
 # Fields the diff reports on. Mirrors ``_SAFE_TEXT_FIELDS`` from
 # ``compute_merge`` plus ``launch_status`` / ``pricing_model`` since
 # those are editorial fields the LLM is allowed to propose on

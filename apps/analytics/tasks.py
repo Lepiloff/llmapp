@@ -3,20 +3,20 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Dict
 
 from celery import shared_task
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.utils import timezone
 
 from apps.catalog.models import App
+
 from .models import ClickEvent, PageView, TrendingScore
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task
-def calculate_trending_scores() -> Dict[str, int]:
+def calculate_trending_scores() -> dict[str, int]:
     """Calculate trending scores for all apps based on recent clicks.
 
     This task runs periodically to update the trending scores used
@@ -73,7 +73,7 @@ def calculate_trending_scores() -> Dict[str, int]:
 
 
 @shared_task
-def cleanup_old_analytics_data(days_to_keep: int = 90) -> Dict[str, int]:
+def cleanup_old_analytics_data(days_to_keep: int = 90) -> dict[str, int]:
     """Clean up old analytics data to keep the database size manageable.
 
     Removes click events and page views older than the specified number of days.
@@ -145,7 +145,7 @@ def _calculate_app_trending_score(app: App, since: timezone.datetime) -> float:
 
 
 @shared_task
-def generate_analytics_report() -> Dict[str, any]:
+def generate_analytics_report() -> dict[str, any]:
     """Generate a periodic analytics report for internal use."""
     now = timezone.now()
     last_24h = now - timedelta(days=1)

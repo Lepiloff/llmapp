@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from django.test import override_settings
 
 from apps.agent.llm.client import MockLLMProvider
@@ -20,7 +19,6 @@ from apps.agent.sources.base import DiscoveryCandidate
 from apps.agent.tasks import _run_discovery_batch, enrich_pending_drafts_batch
 from apps.catalog.models import App, Capability, Category, ListingType, Platform
 from apps.sources.models import Source
-
 
 pytestmark = pytest.mark.django_db
 

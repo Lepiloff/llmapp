@@ -123,8 +123,8 @@ class UseCaseAdmin(admin.ModelAdmin):
         AppUseCase from the non-target rows onto the target, then
         deletes the source rows.
         """
-        from django.shortcuts import render
         from django.http import HttpResponseRedirect
+        from django.shortcuts import render
 
         from .services import merge_use_cases
 

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from django.core import mail
 from django.test import override_settings
 
 from apps.agent.models import AgentRun, EnrichmentTask, NeedsReviewQueueEntry
 from apps.agent.tasks import review_acceptance_stats, send_review_queue_digest
 from apps.catalog.models import App
-
 
 pytestmark = pytest.mark.django_db
 

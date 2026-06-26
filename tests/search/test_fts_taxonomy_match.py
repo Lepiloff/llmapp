@@ -15,7 +15,6 @@ from django.test import override_settings
 from apps.catalog.models import App, Category, Platform, UseCase
 from apps.search.tasks import refresh_app_search_vector
 
-
 pytestmark = pytest.mark.django_db
 
 

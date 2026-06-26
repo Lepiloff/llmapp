@@ -3,14 +3,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-
 from django.utils import timezone
 
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.catalog.models import App
 from apps.sources import tasks
 from apps.sources.models import LinkCheckResult, LinkHealth, Source
-
 
 pytestmark = pytest.mark.django_db
 

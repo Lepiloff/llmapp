@@ -15,8 +15,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.catalog.models import Category, Platform
-
+from apps.catalog.models import App, Category, Platform
 
 # Demo apps were removed once the agent pipeline started producing real
 # entries. Kept as an empty list so the rest of the command still type-checks;

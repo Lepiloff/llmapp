@@ -13,12 +13,12 @@ from django.db.models import Prefetch, QuerySet
 class AppQuerySet(QuerySet):
     """Reusable query helpers — keep view code declarative and DRY."""
 
-    def published(self) -> "AppQuerySet":
+    def published(self) -> AppQuerySet:
         from .models import App
 
         return self.filter(status=App.AppStatus.PUBLISHED, is_indexable=True)
 
-    def for_listing(self) -> "AppQuerySet":
+    def for_listing(self) -> AppQuerySet:
         """Preload everything needed to render an `app_card` partial.
 
         N+1 prevention: list pages render dozens of cards; without this
@@ -27,7 +27,7 @@ class AppQuerySet(QuerySet):
         """
         return self.prefetch_related("platforms", "categories", "listing_types")
 
-    def for_detail(self) -> "AppQuerySet":
+    def for_detail(self) -> AppQuerySet:
         """Preload everything needed to render the app detail page."""
         from .models import AppCapability, AppPlatform
 
@@ -46,10 +46,10 @@ class AppQuerySet(QuerySet):
             ),
         )
 
-    def featured(self) -> "AppQuerySet":
+    def featured(self) -> AppQuerySet:
         return self.filter(is_featured=True)
 
-    def trending(self, window_days: int = 7) -> "AppQuerySet":
+    def trending(self, window_days: int = 7) -> AppQuerySet:
         """Order by precomputed trending score for the given window.
 
         Reads from ``analytics.TrendingScore`` (refreshed by the daily

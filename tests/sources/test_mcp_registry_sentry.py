@@ -7,10 +7,8 @@ counters every day and operators wouldn't notice.
 from __future__ import annotations
 
 import sys
-import types
 from unittest.mock import MagicMock
 
-import pytest
 import requests
 
 from apps.sources.mcp_registry import MCPRegistrySource, _report_to_sentry

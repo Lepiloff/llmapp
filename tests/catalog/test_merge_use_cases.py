@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from django.test import override_settings
 
 from apps.catalog.models import App, AppUseCase, UseCase
 from apps.catalog.services import merge_use_cases
-
 
 pytestmark = pytest.mark.django_db
 

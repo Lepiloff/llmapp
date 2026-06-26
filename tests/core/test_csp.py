@@ -3,17 +3,16 @@ from __future__ import annotations
 
 import re
 
-import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory
 
 from apps.core.csp import (
-    CSPMiddleware,
     GOOGLE_FONTS_CSS_ORIGIN,
     GOOGLE_FONTS_FILES_ORIGIN,
     TAILWIND_CDN_ORIGIN,
     TURNSTILE_SCRIPT_ORIGIN,
     UNPKG_CDN_ORIGIN,
+    CSPMiddleware,
 )
 
 

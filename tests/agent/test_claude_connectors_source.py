@@ -8,7 +8,6 @@ from apps.agent.sources.claude_connectors import (
     parse_index_page,
 )
 
-
 ROBOTS_ALLOW = "User-agent: *\nAllow: /\n"
 ROBOTS_DISALLOW = "User-agent: *\nDisallow: /connectors\n"
 

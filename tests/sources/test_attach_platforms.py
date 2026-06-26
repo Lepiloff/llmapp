@@ -9,7 +9,6 @@ by hand (``region_availability``, ``supported_plans``,
 from __future__ import annotations
 
 import pytest
-from django.test import override_settings
 from django.utils import timezone
 
 from apps.catalog.models import App, AppPlatform, Platform
@@ -146,7 +145,6 @@ def test_rediscovery_shallow_merges_metadata(app, mcp_platform) -> None:
 def test_last_verified_at_always_updates(app, mcp_platform) -> None:
     attach_platforms(app, _draft())
     row = AppPlatform.objects.get(app=app, platform=mcp_platform)
-    old_ts = row.last_verified_on_platform_at
 
     # Force-roll the row back so the timestamp difference is observable.
     AppPlatform.objects.filter(pk=row.pk).update(
@@ -183,7 +181,8 @@ def test_concurrent_editor_edit_survives_attach_platforms(
     editor commits and then reads the fresh value.
     """
     from threading import Event, Thread
-    from django.db import close_old_connections, connection
+
+    from django.db import close_old_connections
 
     attach_platforms(app, _draft())  # seed with region=unknown
 

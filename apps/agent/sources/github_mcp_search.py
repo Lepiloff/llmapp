@@ -15,7 +15,6 @@ from apps.sources.base import AppDraft
 
 from .base import DiscoveryCandidate
 
-
 GitHubGet = Callable[[str, dict, dict], dict]
 
 

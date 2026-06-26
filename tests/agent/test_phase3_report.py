@@ -5,14 +5,12 @@ from decimal import Decimal
 from io import StringIO
 
 import pytest
-
 from django.core.management import call_command
 
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog
 from apps.agent.reports import phase3_gate_report
 from apps.catalog.models import App
 from apps.sources.models import Source
-
 
 pytestmark = pytest.mark.django_db
 

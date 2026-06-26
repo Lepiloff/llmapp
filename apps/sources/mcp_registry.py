@@ -15,7 +15,7 @@ Operational guarantees:
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 from urllib.parse import quote
 
 import requests
@@ -43,7 +43,7 @@ def _is_json_safe(value) -> bool:
     ``UnparsedRegistryRecord.payload`` JSONField, avoiding a serialization
     error that would mask the original parse failure.
     """
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if value is None or isinstance(value, bool | int | float | str):
         return True
     if isinstance(value, list):
         return all(_is_json_safe(item) for item in value)

@@ -11,13 +11,12 @@ Architecture refs:
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from django.db import transaction
 from django.utils import timezone
 
 from .models import App, AppCapability
-
 
 # Quality scoring (business.md § 12).
 # Predicates take an `App` (with the M2M relations prefetched is a plus) and

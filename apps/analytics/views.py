@@ -6,13 +6,14 @@ from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, Http404
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 from django_ratelimit.decorators import ratelimit
 
 from apps.catalog.models import App
+
 from .models import ClickEvent, PageView
 from .utils import get_client_ip, get_session_key
 
@@ -66,8 +67,8 @@ def outbound_redirect(request: HttpRequest, slug: str) -> HttpResponse:
     validator = URLValidator()
     try:
         validator(target_url)
-    except ValidationError:
-        raise Http404("Invalid target URL")
+    except ValidationError as exc:
+        raise Http404("Invalid target URL") from exc
 
     # Security check: only allow redirects to expected domains
     parsed_url = urlparse(target_url)

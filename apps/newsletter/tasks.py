@@ -3,23 +3,23 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Dict, List
 
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db.models import Count, Q
 from django.template.loader import render_to_string
 from django.utils import timezone
-from django.db.models import Count, Q
 
 from apps.catalog.models import App
-from .models import Subscriber, Issue, IssueApp
+
+from .models import Issue, IssueApp, Subscriber
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task
-def send_newsletter_issue(issue_id: int) -> Dict[str, int]:
+def send_newsletter_issue(issue_id: int) -> dict[str, int]:
     """Send newsletter issue to all active subscribers."""
     try:
         issue = Issue.objects.get(id=issue_id, status=Issue.Status.SCHEDULED)
@@ -75,7 +75,7 @@ def send_newsletter_issue(issue_id: int) -> Dict[str, int]:
 
 
 @shared_task
-def create_weekly_draft() -> Dict[str, any]:
+def create_weekly_draft() -> dict[str, any]:
     """Create a draft newsletter issue with trending apps.
 
     This task runs weekly to prepare a draft newsletter that editors can review and send.
@@ -144,7 +144,7 @@ That's all for this week! Keep exploring and building amazing things with AI.
                 issue=issue,
                 app=app,
                 sort_order=len(trending_apps) + i + 1,
-                description=f"New app added to the catalog this week."
+                description="New app added to the catalog this week."
             )
 
         result = {
@@ -163,7 +163,7 @@ That's all for this week! Keep exploring and building amazing things with AI.
 
 
 @shared_task
-def cleanup_old_newsletter_data(days_to_keep: int = 90) -> Dict[str, int]:
+def cleanup_old_newsletter_data(days_to_keep: int = 90) -> dict[str, int]:
     """Clean up old newsletter tracking data."""
     cutoff_date = timezone.now() - timedelta(days=days_to_keep)
 

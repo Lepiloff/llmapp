@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import dj_database_url
 from celery.schedules import crontab
 from decouple import Csv, config
 
@@ -108,8 +109,6 @@ TEMPLATES = [
 # ---------------------------------------------------------------------------
 # Database (PostgreSQL is mandatory — pg_trgm + tsvector are core).
 # ---------------------------------------------------------------------------
-import dj_database_url
-
 DATABASES = {
     "default": dj_database_url.config(
         default=config(

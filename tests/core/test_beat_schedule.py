@@ -12,7 +12,6 @@ import importlib
 import pytest
 from django.conf import settings
 
-
 REQUIRED_TASKS = {
     "apps.sources.tasks.ingest_mcp_registry",
     "apps.sources.tasks.check_app_links_batch",

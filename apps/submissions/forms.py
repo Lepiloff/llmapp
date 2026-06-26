@@ -116,8 +116,8 @@ class SubmissionForm(forms.ModelForm):
             result = response.json()
             if not result.get('success'):
                 raise ValidationError("CAPTCHA verification failed")
-        except Exception:
-            raise ValidationError("CAPTCHA verification failed")
+        except Exception as exc:
+            raise ValidationError("CAPTCHA verification failed") from exc
 
         return token
 

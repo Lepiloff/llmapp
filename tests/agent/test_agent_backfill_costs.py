@@ -21,7 +21,6 @@ from django.test import override_settings
 
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog
 
-
 pytestmark = pytest.mark.django_db
 
 

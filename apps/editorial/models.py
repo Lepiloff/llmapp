@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from django.contrib.auth.models import User
 from django.db import models
-from django.db.models import Q, TextChoices
+from django.db.models import TextChoices
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
@@ -283,6 +283,9 @@ class PostApp(models.Model):
         unique_together = ("post", "app")
         ordering = ["sort_order", "id"]
 
+    def __str__(self) -> str:
+        return f"{self.post} -> {self.app}"
+
 
 class CollectionApp(models.Model):
     """Through model for Collection <-> App relationship."""
@@ -298,3 +301,6 @@ class CollectionApp(models.Model):
     class Meta:
         unique_together = ("collection", "app")
         ordering = ["sort_order", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.collection} -> {self.app}"

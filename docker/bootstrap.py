@@ -6,7 +6,6 @@ import subprocess
 
 import psycopg
 
-
 LOCK_ID = 4_832_319_441
 
 

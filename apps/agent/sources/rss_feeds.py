@@ -19,7 +19,6 @@ from apps.agent.pipeline.rate_limit import get_default_limiter
 
 from .base import DiscoveryCandidate
 
-
 DEFAULT_RSS_FEEDS: tuple[str, ...] = (
     "https://openai.com/news/rss.xml",
     "https://www.anthropic.com/news/rss.xml",

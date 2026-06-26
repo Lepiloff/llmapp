@@ -4,7 +4,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.utils import timezone
 
-from .models import Post, Collection, Comparison, Tag, PostApp, CollectionApp
+from .models import Collection, CollectionApp, Comparison, Post, PostApp, Tag
 
 
 class PostAppInline(admin.TabularInline):

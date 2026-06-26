@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from apps.agent.llm.client import MockLLMProvider
 from apps.agent.llm.schemas import (
     CapabilityProposal,
     CategoryProposal,
@@ -27,7 +28,6 @@ from apps.agent.llm.schemas import (
     ListingTypeProposal,
     MergeSet,
 )
-from apps.agent.llm.client import MockLLMProvider
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.agent.persist import (
     AppNotEligibleError,
@@ -39,19 +39,17 @@ from apps.agent.persist import (
     build_taxonomy_snapshot,
     queue_reactualization,
 )
-from apps.agent.pipeline.reactualize import ReactualizationDiff, FieldDelta, TaxonomyDelta
 from apps.agent.pipeline.enrich import enrich_existing_draft
+from apps.agent.pipeline.reactualize import FieldDelta, ReactualizationDiff, TaxonomyDelta
 from apps.catalog.models import (
     App,
     AppCapability,
-    AppCategory,
     Capability,
     Category,
     ListingType,
     Platform,
 )
 from apps.sources.models import Source
-
 
 pytestmark = pytest.mark.django_db
 

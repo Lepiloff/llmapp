@@ -16,7 +16,6 @@ from __future__ import annotations
 from io import StringIO
 
 import pytest
-
 from django.core.management import call_command
 from django.test import override_settings
 
@@ -24,7 +23,6 @@ from apps.agent.llm import client as agent_client
 from apps.agent.llm.schemas import CapabilityProposal, MergeSet
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 from apps.catalog.models import App, AppCapability, Capability, Platform
-
 
 pytestmark = pytest.mark.django_db
 

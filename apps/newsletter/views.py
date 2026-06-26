@@ -1,17 +1,17 @@
 """Newsletter views for subscription management and issue display."""
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.mail import send_mail
-from django.http import HttpRequest, HttpResponse, Http404
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
-from django.views.decorators.http import require_http_methods
-from django.conf import settings
 from django.utils import timezone
+from django.views.decorators.http import require_http_methods
 
 from .forms import SubscriberForm
-from .models import Subscriber, Issue, EmailOpen, EmailClick
+from .models import EmailClick, EmailOpen, Issue, Subscriber
 from .utils import get_client_ip
 
 
@@ -82,8 +82,8 @@ def confirm_subscription(request: HttpRequest, token: str) -> HttpResponse:
 
         return render(request, 'newsletter/confirm_success.html', {'subscriber': subscriber})
 
-    except Subscriber.DoesNotExist:
-        raise Http404("Invalid confirmation link")
+    except Subscriber.DoesNotExist as exc:
+        raise Http404("Invalid confirmation link") from exc
 
 
 def unsubscribe(request: HttpRequest, token: str) -> HttpResponse:
@@ -98,8 +98,8 @@ def unsubscribe(request: HttpRequest, token: str) -> HttpResponse:
 
         return render(request, 'newsletter/unsubscribe_confirm.html', {'subscriber': subscriber})
 
-    except Subscriber.DoesNotExist:
-        raise Http404("Invalid unsubscribe link")
+    except Subscriber.DoesNotExist as exc:
+        raise Http404("Invalid unsubscribe link") from exc
 
 
 def issue_archive(request: HttpRequest) -> HttpResponse:

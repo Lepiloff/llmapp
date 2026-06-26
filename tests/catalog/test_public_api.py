@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.catalog.models import App, Capability, AppCapability, Category, Platform
-
+from apps.catalog.models import App, AppCapability, Capability, Category, Platform
 
 pytestmark = pytest.mark.django_db
 

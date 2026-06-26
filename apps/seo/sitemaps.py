@@ -9,7 +9,7 @@ from django.contrib.sitemaps import Sitemap
 from django.urls import reverse
 
 from apps.catalog.models import App, Category, Platform
-from apps.editorial.models import Post, Collection, Comparison
+from apps.editorial.models import Collection, Comparison, Post
 
 
 class AppsSitemap(Sitemap):

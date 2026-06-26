@@ -5,7 +5,7 @@ from django.contrib import admin
 from django.utils import timezone
 from django.utils.html import format_html
 
-from .models import Subscriber, Issue, IssueApp, EmailClick, EmailOpen
+from .models import EmailClick, EmailOpen, Issue, IssueApp, Subscriber
 
 
 class IssueAppInline(admin.TabularInline):
@@ -125,8 +125,7 @@ class IssueAdmin(admin.ModelAdmin):
     schedule_issues.short_description = "Schedule for tomorrow 10 AM"
 
     def send_test_issue(self, request, queryset):
-        from .tasks import send_newsletter_issue
-        for issue in queryset.filter(status=Issue.Status.DRAFT):
+        for _issue in queryset.filter(status=Issue.Status.DRAFT):
             # Create a test issue copy
             # This would need implementation
             pass

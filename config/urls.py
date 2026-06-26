@@ -5,18 +5,17 @@ Architecture refs:
 """
 from __future__ import annotations
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.sitemaps.views import sitemap
 from django.urls import include, path
 from django.views.decorators.cache import cache_page
 from django.views.generic import TemplateView
-from django.conf import settings
-from django.conf.urls.static import static
 
 from apps.catalog import views as catalog_views
 from apps.catalog.api import api as catalog_api
 from apps.search import views as search_views
-
 from apps.seo.sitemaps import AppsSitemap, CategoriesSitemap, PlatformsSitemap, StaticSitemap
 
 sitemaps = {

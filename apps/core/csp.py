@@ -32,10 +32,9 @@ inline ``<script>`` is unavoidable.
 from __future__ import annotations
 
 import secrets
-from typing import Callable
+from collections.abc import Callable
 
 from django.http import HttpRequest, HttpResponse
-
 
 TURNSTILE_SCRIPT_ORIGIN = "https://challenges.cloudflare.com"
 TAILWIND_CDN_ORIGIN = "https://cdn.tailwindcss.com"

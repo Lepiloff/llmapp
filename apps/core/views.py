@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 from django.http import HttpRequest, JsonResponse
-from django.db import connection
-from django_redis import get_redis_connection
 
 from . import healthcheck
 

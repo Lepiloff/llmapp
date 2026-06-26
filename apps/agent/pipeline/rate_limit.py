@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 from urllib.parse import urlparse
 
 

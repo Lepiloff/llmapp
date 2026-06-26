@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from apps.agent.pipeline.rate_limit import RateLimiter, host_key
 
@@ -127,6 +127,7 @@ def build_limiter_from_settings() -> RateLimiter:
     — fly through this in single-digit milliseconds.
     """
     from django.conf import settings
+
     from apps.agent.pipeline.rate_limit import (
         InMemoryDomainRateLimiter,
         NoopRateLimiter,

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 from apps.catalog.models import App, AppCapability, Capability, Category, Platform
-
 
 pytestmark = pytest.mark.django_db
 

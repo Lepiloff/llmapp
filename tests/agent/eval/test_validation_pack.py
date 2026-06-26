@@ -26,7 +26,6 @@ from apps.agent.pipeline.taxonomy import TaxonomySnapshot
 from apps.agent.pipeline.validate import validate_enriched_draft
 from tests.agent.eval.loader import load_fixtures
 
-
 _SEED_JSON = (
     Path(__file__).resolve().parents[3]
     / "apps" / "catalog" / "fixtures" / "seed.json"

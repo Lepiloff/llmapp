@@ -39,13 +39,12 @@ from apps.agent.tasks import (
 )
 from apps.catalog.models import (
     App,
-    Category,
     Capability,
+    Category,
     ListingType,
     Platform,
 )
 from apps.sources.models import Source
-
 
 pytestmark = pytest.mark.django_db
 
@@ -180,7 +179,6 @@ def test_run_reactualize_app_with_empty_diff_writes_no_queue_entry(
     assert not NeedsReviewQueueEntry.objects.filter(
         kind=NeedsReviewQueueEntry.Kind.REACTUALIZED
     ).exists()
-    Source.objects.get(app=published_app).last_enriched_at  # not None
     assert Source.objects.get(app=published_app).last_enriched_at is not None
 
 

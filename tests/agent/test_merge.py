@@ -6,8 +6,6 @@ between hallucinations / drift and the catalog's editorial state.
 """
 from __future__ import annotations
 
-import pytest
-
 from apps.agent.llm.schemas import (
     AppSnapshot,
     CapabilityProposal,

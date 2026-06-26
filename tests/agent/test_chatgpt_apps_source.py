@@ -8,7 +8,6 @@ from apps.agent.sources.chatgpt_apps import (
     parse_index_page,
 )
 
-
 ROBOTS_ALLOW = "User-agent: *\nAllow: /\n"
 
 INDEX_HTML = """

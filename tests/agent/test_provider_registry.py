@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from apps.agent.llm.client import (
-    LLMProvider,
-    LLMResponse,
-    LLMCallMetadata,
-    MockLLMProvider,
     _PROVIDER_REGISTRY,
+    LLMProvider,
+    MockLLMProvider,
     build_provider,
     register_provider,
 )
@@ -93,8 +90,12 @@ def test_register_provider_is_case_insensitive(_isolated_registry) -> None:
 
 
 def test_re_registering_replaces_builder(_isolated_registry) -> None:
-    first = lambda *a, **k: MockLLMProvider(model="first")
-    second = lambda *a, **k: MockLLMProvider(model="second")
+    def first(*_args, **_kwargs):
+        return MockLLMProvider(model="first")
+
+    def second(*_args, **_kwargs):
+        return MockLLMProvider(model="second")
+
     register_provider("custom", first)
     register_provider("custom", second)
 

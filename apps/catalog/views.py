@@ -10,13 +10,10 @@ cross, newly-added strip).
 """
 from __future__ import annotations
 
-from datetime import timedelta
-
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
 from django.views.decorators.cache import cache_page
 
 from .models import App, Category, Platform

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import pytest
-
 from django.utils import timezone
 
 from apps.catalog.models import App
 from apps.sources.models import Source
-
 
 pytestmark = pytest.mark.django_db
 

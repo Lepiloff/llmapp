@@ -1,11 +1,12 @@
 """TaxonomySnapshot building from the live ORM."""
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from apps.agent.persist import build_taxonomy_snapshot
 from apps.catalog.models import Capability, Category, ListingType, Platform
-
 
 pytestmark = pytest.mark.django_db
 
@@ -44,7 +45,7 @@ def test_snapshot_reflects_db_state(reference_data) -> None:
 def test_snapshot_is_frozen(reference_data) -> None:
     snap = build_taxonomy_snapshot()
     # Frozen dataclass — assignment raises.
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         snap.platform_slugs = ("oops",)  # type: ignore[misc]
 
 

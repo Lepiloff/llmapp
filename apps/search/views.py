@@ -7,14 +7,15 @@ Architecture refs:
 from __future__ import annotations
 
 from django.conf import settings
-from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.core.paginator import Paginator
-from django.db.models import Q, Count, Value
+from django.db.models import Count, Q, Value
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from apps.catalog.models import App, Category, Platform, Capability
-from .models import SearchLog, PopularSearch
+from apps.catalog.models import App, Capability, Category, Platform
+
+from .models import PopularSearch, SearchLog
 from .utils import get_client_ip
 
 

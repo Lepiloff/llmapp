@@ -22,7 +22,6 @@ from apps.sources import tasks
 from apps.sources.base import AppDraft
 from apps.sources.models import Source, UnparsedRegistryRecord
 
-
 pytestmark = pytest.mark.django_db
 
 

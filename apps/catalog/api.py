@@ -18,13 +18,10 @@ lean ~20-line response per app.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from django.shortcuts import get_object_or_404
 from ninja import NinjaAPI, Query, Schema
 
 from apps.catalog.models import App, Category, Platform
-
 
 api = NinjaAPI(
     version="1.0",
@@ -124,8 +121,8 @@ def _serialize_detail(app: App) -> dict:
 # Listing filters
 # ---------------------------------------------------------------------------
 class AppListFilters(Schema):
-    platform: Optional[str] = None
-    category: Optional[str] = None
+    platform: str | None = None
+    category: str | None = None
     page: int = 1
     page_size: int = 24
 
@@ -137,11 +134,14 @@ class PaginatedAppsOut(Schema):
     results: list[AppListOut]
 
 
+APP_LIST_FILTERS_QUERY = Query(...)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @api.get("/apps/", response=PaginatedAppsOut)
-def list_apps(request, filters: AppListFilters = Query(...)):
+def list_apps(request, filters: AppListFilters = APP_LIST_FILTERS_QUERY):
     """Paginated list of published apps with optional filters."""
     qs = App.published.all().for_listing().order_by("-quality_score", "-first_seen_at")
     if filters.platform:

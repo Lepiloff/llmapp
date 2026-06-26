@@ -7,7 +7,6 @@ from apps.sources.base import AppDraft
 from apps.sources.models import DuplicateCandidate, Source
 from apps.sources.upsert import upsert_app_from_draft
 
-
 pytestmark = pytest.mark.django_db
 
 

@@ -8,7 +8,6 @@ import logging
 
 from django.db import connection
 from django.http import HttpRequest, JsonResponse
-
 from django_redis import get_redis_connection
 
 logger = logging.getLogger(__name__)

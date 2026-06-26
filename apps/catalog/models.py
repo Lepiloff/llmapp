@@ -392,6 +392,9 @@ class AppCategory(models.Model):
         unique_together = ("app", "category")
         indexes = [models.Index(fields=["category", "app"])]
 
+    def __str__(self) -> str:
+        return f"{self.app} in {self.category}"
+
 
 class AppCapability(models.Model):
     class CapabilityValue(TextChoices):
@@ -425,3 +428,6 @@ class AppUseCase(models.Model):
 
     class Meta:
         unique_together = ("app", "use_case")
+
+    def __str__(self) -> str:
+        return f"{self.app} for {self.use_case}"

@@ -23,9 +23,9 @@ Hard invariants (also enforced by tests):
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Iterable
 
 from django.db import transaction
 from django.db.models import F, Q
@@ -33,7 +33,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.agent.llm.schemas import AppSnapshot, EnrichedDraft
-from apps.agent.models import AgentRun, EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
+from apps.agent.models import EnrichmentTask, LLMCallLog, NeedsReviewQueueEntry
 from apps.agent.pipeline.enrich import EnrichmentResult, NewAppEnrichmentResult
 from apps.agent.pipeline.merge import Plan, QueueProposal
 from apps.agent.pipeline.reactualize import ReactualizationDiff
@@ -47,8 +47,8 @@ from apps.catalog.models import (
     Platform,
     UseCase,
 )
-from apps.sources.models import Source
 from apps.sources.base import AppDraft
+from apps.sources.models import Source
 from apps.sources.upsert import upsert_app_from_draft
 
 logger = logging.getLogger(__name__)

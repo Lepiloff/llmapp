@@ -6,7 +6,6 @@ Architecture refs:
 from __future__ import annotations
 
 import logging
-from typing import List
 
 from celery import shared_task
 from django.contrib.postgres.search import SearchVector
@@ -143,11 +142,12 @@ def refresh_app_search_vector(app: App) -> None:
 @shared_task
 def update_popular_searches() -> dict:
     """Update popular search terms based on recent search logs."""
-    from django.db.models import Count
-    from django.utils import timezone
     from datetime import timedelta
 
-    from .models import SearchLog, PopularSearch
+    from django.db.models import Count
+    from django.utils import timezone
+
+    from .models import PopularSearch, SearchLog
 
     try:
         # Get search terms from the last 30 days

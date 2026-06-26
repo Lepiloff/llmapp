@@ -5,14 +5,15 @@ Architecture refs:
 """
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any
+
 from django.conf import settings
 
 from apps.catalog.models import App
 from apps.editorial.models import Post
 
 
-def generate_app_json_ld(app: App) -> Dict[str, Any]:
+def generate_app_json_ld(app: App) -> dict[str, Any]:
     """Generate JSON-LD structured data for an app."""
     data = {
         "@context": "https://schema.org",
@@ -71,7 +72,7 @@ def generate_app_json_ld(app: App) -> Dict[str, Any]:
     return data
 
 
-def generate_article_json_ld(post: Post) -> Dict[str, Any]:
+def generate_article_json_ld(post: Post) -> dict[str, Any]:
     """Generate JSON-LD structured data for a blog post."""
     data = {
         "@context": "https://schema.org",
@@ -117,7 +118,7 @@ def generate_article_json_ld(post: Post) -> Dict[str, Any]:
     return data
 
 
-def generate_organization_json_ld() -> Dict[str, Any]:
+def generate_organization_json_ld() -> dict[str, Any]:
     """Generate JSON-LD structured data for the site organization."""
     return {
         "@context": "https://schema.org",
@@ -132,7 +133,7 @@ def generate_organization_json_ld() -> Dict[str, Any]:
     }
 
 
-def generate_website_json_ld() -> Dict[str, Any]:
+def generate_website_json_ld() -> dict[str, Any]:
     """Generate JSON-LD structured data for the website."""
     return {
         "@context": "https://schema.org",
@@ -151,7 +152,7 @@ def generate_website_json_ld() -> Dict[str, Any]:
     }
 
 
-def generate_breadcrumb_json_ld(breadcrumbs: list) -> Dict[str, Any]:
+def generate_breadcrumb_json_ld(breadcrumbs: list) -> dict[str, Any]:
     """Generate JSON-LD structured data for breadcrumb navigation.
 
     Args:

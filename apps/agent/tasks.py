@@ -13,6 +13,7 @@ through the broker — important for Phase 1 dry-runs and tests where
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import islice
@@ -33,12 +34,12 @@ from apps.agent.budget import (
 )
 from apps.agent.llm.client import LLMProvider, build_provider
 from apps.agent.models import (
-    AgentRun, BudgetMonthState, EnrichmentTask, NeedsReviewQueueEntry,
+    AgentRun,
+    BudgetMonthState,
+    EnrichmentTask,
+    NeedsReviewQueueEntry,
 )
-from apps.agent.pipeline.discovery import DiscoveryResult, classify_candidate
-from apps.agent.pipeline.fetch import FetchResult, fetch_url_text
 from apps.agent.persist import (
-    AppNotEligibleError,
     NewDraftPersistResult,
     PersistResult,
     ReactualizationPersistResult,
@@ -53,18 +54,20 @@ from apps.agent.persist import (
     queue_reactualization,
     record_llm_call,
 )
+from apps.agent.pipeline.discovery import DiscoveryResult, classify_candidate
 from apps.agent.pipeline.enrich import (
     EnrichmentResult,
     NewAppEnrichmentResult,
     enrich_existing_draft,
     enrich_new_app,
 )
+from apps.agent.pipeline.fetch import FetchResult, fetch_url_text
 from apps.agent.pipeline.reactualize import (
     ReactualizationDiff,
     compute_reactualization,
 )
-from apps.agent.sources.claude_connectors import ClaudeConnectorsSource
 from apps.agent.sources.chatgpt_apps import ChatGPTAppsSource
+from apps.agent.sources.claude_connectors import ClaudeConnectorsSource
 from apps.agent.sources.gemini_extensions import GeminiExtensionsSource
 from apps.agent.sources.github_mcp_search import (
     GitHubMCPSearchSource,
@@ -91,7 +94,7 @@ _DEFAULT_ENRICH_PENDING_SOURCE_TYPES: tuple[str, ...] = (
 )
 
 
-def _fetcher_for_url(url: str) -> "Callable[[str], FetchResult]":
+def _fetcher_for_url(url: str) -> Callable[[str], FetchResult]:
     """Pick a URL fetcher by host.
 
     GitHub repo URLs go through the README-via-API helper — the repo
@@ -1075,6 +1078,7 @@ def reactualize_apps_batch(
         # each EnrichmentTask write hits LLMCallLog already, and the
         # batch-level run row is the canonical place for the aggregate.
         from django.db.models import Sum as _Sum
+
         from apps.agent.models import LLMCallLog as _LLMCallLog
         total_cost = float(
             _LLMCallLog.objects.filter(task__run=run).aggregate(
