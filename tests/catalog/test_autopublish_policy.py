@@ -213,6 +213,27 @@ def test_autopublish_ignores_low_information_verdict_for_trusted_connector() -> 
     assert entry.review_outcome == NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED
 
 
+def test_autopublish_ignores_editorial_prefixed_verdict() -> None:
+    app = _trusted_claude_connector()
+    _review_entry(
+        app,
+        proposed_verdict=(
+            "PROPOSAL: Strong fit as a Claude connector for analytics workflows."
+        ),
+        proposed_pricing_model="unknown",
+    )
+
+    decision = apply_autopublish_decision(
+        app.pk,
+        source_types=(Source.SourceType.CLAUDE_CONNECTORS,),
+    )
+
+    app.refresh_from_db()
+    assert decision.published is True
+    assert app.status == App.AppStatus.PUBLISHED
+    assert app.verdict == ""
+
+
 def test_autopublish_blocks_review_with_skipped_updates() -> None:
     app = _candidate_app()
     _review_entry(

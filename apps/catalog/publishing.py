@@ -40,6 +40,11 @@ LOW_INFORMATION_VERDICTS = {
     "propose approval",
     "recommended",
 }
+EDITORIAL_VERDICT_PREFIXES = (
+    "proposal:",
+    "proposed:",
+    "draft:",
+)
 
 
 @dataclass(slots=True)
@@ -399,5 +404,7 @@ def _plan_scope_summary(app: App, payload: dict[str, Any], plan: ReviewPlan) -> 
 def _is_high_information_verdict(value: str) -> bool:
     normalized = value.strip().lower()
     if normalized in LOW_INFORMATION_VERDICTS:
+        return False
+    if normalized.startswith(EDITORIAL_VERDICT_PREFIXES):
         return False
     return len(normalized) >= 40
