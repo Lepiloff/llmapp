@@ -67,6 +67,34 @@ def is_trusted_official_directory_url(source_type: str, url: str) -> bool:
     return False
 
 
+def is_trusted_non_mcp_connector_app(app: App) -> bool:
+    if app.sources.filter(source_type=Source.SourceType.MCP_REGISTRY).exists():
+        return False
+    if app.platforms.filter(slug="mcp").exists():
+        return False
+    if app.listing_types.filter(slug="mcp-server").exists():
+        return False
+
+    source_types = list(
+        app.sources.filter(
+            source_type__in=TRUSTED_NON_MCP_SOURCE_TYPES,
+            is_active=True,
+        )
+        .values_list("source_type", flat=True)
+        .distinct()
+    )
+    directory_urls = [
+        url
+        for url in app.platform_links.values_list("official_directory_url", flat=True)
+        if url
+    ]
+    return any(
+        is_trusted_official_directory_url(source_type, url)
+        for source_type in source_types
+        for url in directory_urls
+    )
+
+
 def trusted_platform_verification_backfill(
     *,
     source_types: tuple[str, ...] = TRUSTED_NON_MCP_SOURCE_TYPES,

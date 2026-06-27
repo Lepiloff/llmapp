@@ -190,3 +190,28 @@ Production run on commit `00e725b`:
   source. Apply was not run.
 - Follow-up safety fix: non-MCP autopublish now blocks MCP platform/listing
   type too; trust backfill also excludes MCP platform/listing type by default.
+
+Production dry-run on commit `dbb23f2`:
+
+- `/health/`: ok.
+- `LLMCallLog`: `1287 -> 1287`, no LLM calls.
+- Autopublish dry-run:
+  - `evaluated=1064`;
+  - `would_publish=0`;
+  - `published=0`.
+- Top remaining blockers for Claude/ChatGPT-only dry-run:
+  - `short_description_lt_60=298`;
+  - `verdict_required=192`;
+  - `low_information_verdict=187`;
+  - `explicit_capabilities_lt_3=118`.
+
+Follow-up implementation:
+
+- Added a compact publish profile for trusted non-MCP cloud connectors:
+  - applies only when the app is an official Claude/ChatGPT directory row;
+  - excludes MCP source, MCP platform, and `mcp-server` listing type;
+  - accepts `short_description >= 20` when `long_description >= 60`;
+  - accepts at least 2 explicit capabilities instead of 3.
+- Autopublish no longer treats a low-information proposed verdict as a blocker;
+  it simply does not apply that verdict. The base publish gate never required
+  verdict, so this aligns automation with the checklist.

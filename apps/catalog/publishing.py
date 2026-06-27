@@ -17,6 +17,7 @@ from django.utils import timezone
 from apps.agent.models import NeedsReviewQueueEntry
 from apps.catalog.models import App, AppCapability, AppPlatform
 from apps.catalog.services import transition_to_published
+from apps.catalog.trust import is_trusted_non_mcp_connector_app
 from apps.sources.models import DuplicateCandidate, Source
 
 NON_MCP_AUTOPUBLISH_SOURCE_TYPES = (
@@ -129,9 +130,6 @@ def evaluate_autopublish_candidate(
             blockers.extend(review_plan.blockers)
         else:
             blockers.append("pending_review_entries")
-
-    if not (app.verdict or review_plan.app_updates.get("verdict")):
-        blockers.append("verdict_required")
 
     active_source_types = list(
         app.sources.filter(source_type__in=source_types, is_active=True)
@@ -263,7 +261,13 @@ def _base_publish_blockers(app: App, *, source_types: tuple[str, ...]) -> list[s
     if not mcp_allowed and app.listing_types.filter(slug="mcp-server").exists():
         blockers.append("mcp_listing_type_requires_include_mcp")
     if len(app.short_description or "") < 60:
-        blockers.append("short_description_lt_60")
+        if is_trusted_non_mcp_connector_app(app):
+            if len(app.short_description or "") < 20:
+                blockers.append("short_description_lt_20")
+            if len(app.long_description or "") < 60:
+                blockers.append("long_description_lt_60")
+        else:
+            blockers.append("short_description_lt_60")
     if not (app.long_description or "").strip():
         blockers.append("long_description_required")
     if not app.listing_types.exists():
@@ -272,8 +276,9 @@ def _base_publish_blockers(app: App, *, source_types: tuple[str, ...]) -> list[s
         blockers.append("platform_required")
     if not app.categories.exists():
         blockers.append("category_required")
-    if _explicit_capability_count(app) < 3:
-        blockers.append("explicit_capabilities_lt_3")
+    minimum_caps = 2 if is_trusted_non_mcp_connector_app(app) else 3
+    if _explicit_capability_count(app) < minimum_caps:
+        blockers.append(f"explicit_capabilities_lt_{minimum_caps}")
     if not (app.official_page_url or app.install_url):
         blockers.append("official_or_install_url_required")
     if app.platform_verification_status == App.PlatformVerificationStatus.UNKNOWN:
@@ -338,7 +343,6 @@ def _plan_verdict(app: App, payload: dict[str, Any], plan: ReviewPlan) -> None:
             plan.blockers.append("review_conflicting_verdict")
             return
         if not _is_high_information_verdict(verdict):
-            plan.blockers.append("low_information_verdict")
             return
         plan.app_updates["verdict"] = verdict[:280]
 

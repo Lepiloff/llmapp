@@ -17,6 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import App, AppCapability
+from .trust import is_trusted_non_mcp_connector_app
 
 # Quality scoring (business.md § 12).
 # Predicates take an `App` (with the M2M relations prefetched is a plus) and
@@ -77,7 +78,13 @@ def _validate_publish(app: App) -> list[str]:
     Mirrors the checklist in docs/business.md § 11.2 line-by-line.
     """
     errors: list[str] = []
-    if len(app.short_description or "") < 60:
+    compact_connector = is_trusted_non_mcp_connector_app(app)
+    if compact_connector:
+        if len(app.short_description or "") < 20:
+            errors.append("short_description must be >= 20 chars")
+        if len(app.long_description or "") < 60:
+            errors.append("long_description must be >= 60 chars")
+    elif len(app.short_description or "") < 60:
         errors.append("short_description must be >= 60 chars")
     if not app.platforms.exists():
         errors.append("at least one platform required")
@@ -89,8 +96,9 @@ def _validate_publish(app: App) -> list[str]:
         .exclude(value=AppCapability.CapabilityValue.UNKNOWN)
         .count()
     )
-    if explicit_caps < 3:
-        errors.append("at least 3 explicit capabilities required")
+    minimum_caps = 2 if compact_connector else 3
+    if explicit_caps < minimum_caps:
+        errors.append(f"at least {minimum_caps} explicit capabilities required")
 
     if not (app.official_page_url or app.install_url):
         errors.append("official_page_url or install_url required")
@@ -123,18 +131,27 @@ def get_publish_checklist(app: App) -> list[dict]:
     def add(label: str, ok: bool, hint: str = "") -> None:
         checks.append({"label": label, "ok": bool(ok), "hint": hint})
 
-    add(
-        "short_description ≥ 60 chars",
-        len(app.short_description or "") >= 60,
-    )
+    compact_connector = is_trusted_non_mcp_connector_app(app)
+    if compact_connector:
+        add(
+            "compact connector description",
+            len(app.short_description or "") >= 20
+            and len(app.long_description or "") >= 60,
+            "trusted official connector profile",
+        )
+    else:
+        add(
+            "short_description ≥ 60 chars",
+            len(app.short_description or "") >= 60,
+        )
     add("at least one platform", app.platforms.exists())
     add("at least one category", app.categories.exists())
     add(
-        "≥ 3 explicit capabilities",
+        "≥ 2 explicit capabilities" if compact_connector else "≥ 3 explicit capabilities",
         AppCapability.objects.filter(app=app)
         .exclude(value=AppCapability.CapabilityValue.UNKNOWN)
         .count()
-        >= 3,
+        >= (2 if compact_connector else 3),
     )
     add(
         "official_page_url or install_url",

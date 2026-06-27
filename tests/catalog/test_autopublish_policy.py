@@ -20,6 +20,7 @@ from apps.catalog.publishing import (
     apply_autopublish_decision,
     evaluate_autopublish_candidate,
 )
+from apps.catalog.services import transition_to_published
 from apps.sources.models import DuplicateCandidate, Source
 
 pytestmark = pytest.mark.django_db
@@ -106,6 +107,58 @@ def _review_entry(app: App, **payload_overrides) -> NeedsReviewQueueEntry:
     )
 
 
+def _trusted_claude_connector() -> App:
+    platform = Platform.objects.get_or_create(
+        slug="claude",
+        defaults={"name": "Claude", "public_path": "claude-connectors"},
+    )[0]
+    category = Category.objects.get_or_create(
+        slug="productivity",
+        defaults={"name": "Productivity"},
+    )[0]
+    listing_type = ListingType.objects.get_or_create(
+        slug="claude-connector",
+        defaults={"name": "Claude Connector"},
+    )[0]
+    app = App.objects.create(
+        name="Compact Claude",
+        slug="compact-claude",
+        short_description="Search and update work records",
+        long_description=(
+            "Search and update work records from Claude using the official "
+            "cloud connector directory listing."
+        ),
+        official_page_url="https://example.com/compact-claude",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+        launch_status=App.LaunchStatus.LIVE,
+    )
+    app.categories.add(category)
+    app.listing_types.add(listing_type)
+    AppPlatform.objects.create(
+        app=app,
+        platform=platform,
+        official_directory_url="https://claude.com/connectors/compact-claude",
+    )
+    for index, key in enumerate(("read_data", "write_actions")):
+        capability = Capability.objects.get_or_create(
+            key=key,
+            defaults={"label": key.replace("_", " ").title()},
+        )[0]
+        AppCapability.objects.create(
+            app=app,
+            capability=capability,
+            value=AppCapability.CapabilityValue.YES,
+            note=f"Official connector page supports capability {index}.",
+        )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:compact-claude",
+        source_url="https://claude.com/connectors/compact-claude",
+    )
+    return app
+
+
 def test_apply_autopublish_accepts_safe_review_and_publishes() -> None:
     app = _candidate_app()
     entry = _review_entry(app)
@@ -126,6 +179,38 @@ def test_apply_autopublish_accepts_safe_review_and_publishes() -> None:
     assert platform_link.scope_summary == decision.platform_scope_summary
     assert entry.review_outcome == NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED
     assert entry.resolved_at is not None
+
+
+def test_trusted_connector_compact_profile_passes_publish_gate() -> None:
+    app = _trusted_claude_connector()
+    app.editorial_review_status = App.EditorialReviewStatus.REVIEWED
+    app.save(update_fields=["editorial_review_status"])
+
+    transition_to_published(app, editor=None)
+
+    app.refresh_from_db()
+    assert app.status == App.AppStatus.PUBLISHED
+
+
+def test_autopublish_ignores_low_information_verdict_for_trusted_connector() -> None:
+    app = _trusted_claude_connector()
+    entry = _review_entry(
+        app,
+        proposed_verdict="recommended",
+        proposed_pricing_model="unknown",
+    )
+
+    decision = apply_autopublish_decision(
+        app.pk,
+        source_types=(Source.SourceType.CLAUDE_CONNECTORS,),
+    )
+
+    app.refresh_from_db()
+    entry.refresh_from_db()
+    assert decision.published is True
+    assert app.status == App.AppStatus.PUBLISHED
+    assert app.verdict == ""
+    assert entry.review_outcome == NeedsReviewQueueEntry.ReviewOutcome.ACCEPTED
 
 
 def test_autopublish_blocks_review_with_skipped_updates() -> None:
