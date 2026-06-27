@@ -215,3 +215,44 @@ Follow-up implementation:
 - Autopublish no longer treats a low-information proposed verdict as a blocker;
   it simply does not apply that verdict. The base publish gate never required
   verdict, so this aligns automation with the checklist.
+
+Production run on commit `e11782a`:
+
+- `/health/`: ok.
+- `LLMCallLog`: `1287 -> 1287`, no LLM calls.
+- Autopublish dry-run after compact profile:
+  - `evaluated=1064`;
+  - `would_publish=170`;
+  - `published=0`.
+- Claude-only dry-run:
+  - `evaluated=25`;
+  - `would_publish=14`.
+- First applied pilot:
+
+```bash
+python manage.py autopublish_candidates --source-type claude_connectors --limit 5 --apply
+```
+
+Result:
+
+- `evaluated=5`;
+- `would_publish=4`;
+- `published=4`;
+- `explicit_capabilities_lt_2=1` remained blocked (`actively`);
+- `LLMCallLog`: `1287 -> 1287`;
+- `App.status` counts after pilot: `draft=15031`, `published=4`.
+
+Published apps:
+
+- `10x-genomics-cloud`
+- `activecampaign`
+- `adisinsight`
+- `adobe-cja`
+
+Validation:
+
+- All 4 public pages returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=10` returned
+  `count=4`.
+- Public sitemap includes all 4 app URLs with `llmappmarket.com`.
+- `/search/?q=adobe` and `/claude-connectors/` returned HTTP 200.
