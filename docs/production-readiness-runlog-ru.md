@@ -146,3 +146,31 @@ Production dry-run on commit `4738ab2`:
   type. Apply was not run.
 - Follow-up safety fix: non-MCP autopublish now blocks any app that already
   has an `mcp_registry` source unless MCP is explicitly opted in.
+
+## Stage 5 follow-up — trusted platform verification
+
+The first autopublish dry-run showed `platform_verification_unknown` as the
+dominant blocker (`1052/1064` evaluated non-MCP candidates). The original
+upsert policy only marked MCP Registry cards as `official`, which was too
+conservative for official direct directories.
+
+Implemented:
+
+- Future ingest marks `platform_verification_status=official` for:
+  - Claude Connector rows whose directory URL is `https://claude.com/connectors...`;
+  - ChatGPT rows whose directory URL is `https://chatgpt.com/apps...`.
+- Gemini Extensions remain `unknown` by default because the current source is
+  GitHub/list-style data and many rows are mixed with MCP.
+- Existing rows can be updated with:
+
+```bash
+python manage.py backfill_trusted_platform_verification --limit 500
+python manage.py backfill_trusted_platform_verification --limit 500 --apply
+```
+
+Safety rules:
+
+- dry-run by default;
+- MCP-mixed apps are excluded unless `--include-mcp` is passed;
+- only `unknown -> official` transitions are written;
+- no publish and no LLM calls happen in this command.

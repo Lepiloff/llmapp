@@ -27,6 +27,7 @@ from apps.catalog.models import (
     Platform,
     UseCase,
 )
+from apps.catalog.trust import platform_verification_for_source
 
 from .base import AppDraft
 from .models import DuplicateCandidate, Source
@@ -485,6 +486,18 @@ def upsert_app_from_draft(draft: AppDraft, source_type: str) -> UpsertOutcome:
             if not getattr(app, field) and getattr(draft, field):
                 setattr(app, field, getattr(draft, field))
                 dirty.append(field)
+        inferred_platform_verification = platform_verification_for_source(
+            source_type,
+            official_directory_url=draft.official_directory_url,
+        )
+        if (
+            app.platform_verification_status
+            == App.PlatformVerificationStatus.UNKNOWN
+            and inferred_platform_verification
+            != App.PlatformVerificationStatus.UNKNOWN
+        ):
+            app.platform_verification_status = inferred_platform_verification
+            dirty.append("platform_verification_status")
         existing.payload = draft.raw_payload
         existing.fetched_at = timezone.now()
         existing.is_active = True
@@ -521,10 +534,9 @@ def _create_new_app(
     *,
     duplicate_candidates: list[DuplicateMatch] | None = None,
 ) -> UpsertOutcome:
-    platform_verification = (
-        App.PlatformVerificationStatus.OFFICIAL
-        if source_type == Source.SourceType.MCP_REGISTRY
-        else App.PlatformVerificationStatus.UNKNOWN
+    platform_verification = platform_verification_for_source(
+        source_type,
+        official_directory_url=draft.official_directory_url,
     )
 
     app = App.objects.create(
