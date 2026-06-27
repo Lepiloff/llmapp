@@ -188,6 +188,24 @@ def test_autopublish_blocks_mixed_mcp_source_without_mcp_opt_in() -> None:
     assert "mcp_source_requires_include_mcp" in decision.blockers
 
 
+def test_autopublish_blocks_mcp_platform_without_mcp_opt_in() -> None:
+    app = _candidate_app()
+    _review_entry(app)
+    mcp = Platform.objects.get_or_create(
+        slug="mcp",
+        defaults={"name": "MCP", "public_path": "mcp-servers"},
+    )[0]
+    app.platforms.add(mcp)
+
+    decision = evaluate_autopublish_candidate(
+        app,
+        source_types=(Source.SourceType.GEMINI_EXTENSIONS,),
+    )
+
+    assert decision.would_publish is False
+    assert "mcp_platform_requires_include_mcp" in decision.blockers
+
+
 def test_autopublish_command_requires_explicit_mcp_opt_in() -> None:
     out = StringIO()
 

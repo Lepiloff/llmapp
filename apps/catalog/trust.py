@@ -107,7 +107,11 @@ def _trusted_backfill_decisions(
         .order_by("first_seen_at", "pk")
     )
     if not include_mcp:
-        queryset = queryset.exclude(sources__source_type=Source.SourceType.MCP_REGISTRY)
+        queryset = queryset.exclude(
+            Q(sources__source_type=Source.SourceType.MCP_REGISTRY)
+            | Q(platforms__slug="mcp")
+            | Q(listing_types__slug="mcp-server")
+        )
 
     for app in queryset[:limit]:
         source_values = list(

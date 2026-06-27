@@ -174,3 +174,19 @@ Safety rules:
 - MCP-mixed apps are excluded unless `--include-mcp` is passed;
 - only `unknown -> official` transitions are written;
 - no publish and no LLM calls happen in this command.
+
+Production run on commit `00e725b`:
+
+- `/health/`: ok.
+- `LLMCallLog`: `1287 -> 1287`, no LLM calls.
+- Trust dry-run: `evaluated=295`, `would_update=295`.
+- Trust apply: `updated=295`.
+- Follow-up autopublish dry-run:
+  - `evaluated=1064`;
+  - `would_publish=1`;
+  - `published=0`.
+- The single candidate was `Figma`, but inspection showed it had MCP taxonomy
+  (`platform=mcp`, `listing_type=mcp-server`) even without an `mcp_registry`
+  source. Apply was not run.
+- Follow-up safety fix: non-MCP autopublish now blocks MCP platform/listing
+  type too; trust backfill also excludes MCP platform/listing type by default.

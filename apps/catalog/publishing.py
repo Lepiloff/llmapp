@@ -115,7 +115,7 @@ def evaluate_autopublish_candidate(
     source_types: tuple[str, ...],
     auto_review: bool = True,
 ) -> PublishDecision:
-    blockers = _base_publish_blockers(app)
+    blockers = _base_publish_blockers(app, source_types=source_types)
     review_plan = ReviewPlan()
     pending_entries = list(
         NeedsReviewQueueEntry.objects.filter(
@@ -251,10 +251,17 @@ def apply_autopublish_decision(
     return decision
 
 
-def _base_publish_blockers(app: App) -> list[str]:
+def _base_publish_blockers(app: App, *, source_types: tuple[str, ...]) -> list[str]:
     blockers: list[str] = []
-    if app.sources.filter(source_type=Source.SourceType.MCP_REGISTRY).exists():
+    mcp_allowed = Source.SourceType.MCP_REGISTRY in source_types
+    if not mcp_allowed and app.sources.filter(
+        source_type=Source.SourceType.MCP_REGISTRY
+    ).exists():
         blockers.append("mcp_source_requires_include_mcp")
+    if not mcp_allowed and app.platforms.filter(slug="mcp").exists():
+        blockers.append("mcp_platform_requires_include_mcp")
+    if not mcp_allowed and app.listing_types.filter(slug="mcp-server").exists():
+        blockers.append("mcp_listing_type_requires_include_mcp")
     if len(app.short_description or "") < 60:
         blockers.append("short_description_lt_60")
     if not (app.long_description or "").strip():

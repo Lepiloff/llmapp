@@ -164,3 +164,36 @@ def test_backfill_excludes_mixed_mcp_by_default() -> None:
     result = json.loads(out.getvalue())
 
     assert result["would_update"] == 0
+
+
+def test_backfill_excludes_mcp_platform_by_default() -> None:
+    chatgpt = _platform("chatgpt")
+    mcp = _platform("mcp")
+    app = App.objects.create(
+        name="Mixed Platform App",
+        slug="mixed-platform-app",
+        short_description="A ChatGPT app that also has MCP platform metadata.",
+        platform_verification_status=App.PlatformVerificationStatus.UNKNOWN,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=chatgpt,
+        official_directory_url="https://chatgpt.com/apps/mixed-platform-app",
+    )
+    app.platforms.add(mcp)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CHATGPT_UNOFFICIAL,
+        external_id="chatgpt:mixed-platform-app",
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_platform_verification",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    result = json.loads(out.getvalue())
+
+    assert result["would_update"] == 0
