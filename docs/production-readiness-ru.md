@@ -249,6 +249,13 @@ Checkpoint 2026-06-29:
 - Команда не перезаписывает существующие `yes/no`, исключает MCP/mixed MCP
   карточки по умолчанию и должна запускаться после direct-ingest/backfill
   перед очередным autopublish dry-run.
+- Добавлен следующий guardrail для duplicate flow:
+  - weak dedupe больше не считает общий platform/source directory host
+    (`claude.com`, `chatgpt.com`, `mcpapp.net`, MCP Registry) доказательством
+    дубликата;
+  - `dismiss_directory_duplicate_candidates` умеет dry-run/apply закрывать
+    уже созданные false positives только для `shared_domain_similar_name`,
+    если score ниже порога настоящего name-match.
 
 ### Stage 7 — Discovery и continuous growth
 

@@ -64,6 +64,14 @@ def unique_slug(hint: str) -> str:
 _NAME_SIMILARITY_THRESHOLD = 0.85
 _WEAK_NAME_SIMILARITY_THRESHOLD = 0.92
 _WEAK_DOMAIN_NAME_SIMILARITY_THRESHOLD = 0.65
+IGNORED_WEAK_DUPLICATE_DOMAINS = frozenset(
+    {
+        "chatgpt.com",
+        "claude.com",
+        "mcpapp.net",
+        "registry.modelcontextprotocol.io",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -231,7 +239,7 @@ def _weak_duplicate_match(draft: AppDraft, candidate: App) -> DuplicateMatch | N
         for _, url in _app_urls(candidate)
         if (domain := _normalized_domain(url))
     }
-    shared_domains = draft_domains & candidate_domains
+    shared_domains = (draft_domains & candidate_domains) - IGNORED_WEAK_DUPLICATE_DOMAINS
     if (
         shared_domains
         and name_score >= _WEAK_DOMAIN_NAME_SIMILARITY_THRESHOLD

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+from io import StringIO
+
 import pytest
+from django.core.management import call_command
 
 from apps.catalog.models import App, Platform
 from apps.sources.base import AppDraft
@@ -143,3 +147,88 @@ def test_weak_domain_name_match_creates_review_candidate() -> None:
     assert candidate.status == DuplicateCandidate.Status.PENDING
     assert candidate.match_reason == "shared_domain_similar_name"
     assert candidate.source == Source.objects.get(app=new_app)
+
+
+def test_directory_domain_name_match_does_not_create_review_candidate() -> None:
+    _existing_app(
+        name="Airtable",
+        slug="airtable",
+        developer_url="",
+        official_page_url="https://claude.com/connectors/airtable",
+    )
+    draft = _draft(
+        name="Airwallex",
+        slug_hint="airwallex",
+        developer_url="",
+        official_page_url="https://claude.com/connectors/airwallex",
+        external_id="claude-airwallex",
+    )
+
+    outcome = upsert_app_from_draft(draft, Source.SourceType.CLAUDE_CONNECTORS)
+
+    assert outcome == "new"
+    assert App.objects.count() == 2
+    assert DuplicateCandidate.objects.count() == 0
+
+
+def test_dismiss_directory_duplicate_candidates_command_dry_run_then_apply() -> None:
+    airtable = _existing_app(
+        name="Airtable",
+        slug="airtable",
+        official_page_url="https://claude.com/connectors/airtable",
+    )
+    airwallex = _existing_app(
+        name="Airwallex",
+        slug="airwallex",
+        official_page_url="https://claude.com/connectors/airwallex",
+    )
+    source = Source.objects.create(
+        app=airwallex,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:airwallex",
+    )
+    weak = DuplicateCandidate.objects.create(
+        app=airwallex,
+        candidate_app=airtable,
+        source=source,
+        match_reason="shared_domain_similar_name",
+        score=0.7,
+        evidence={"domains": ["claude.com"], "name_similarity": 0.7},
+    )
+    strong_name = DuplicateCandidate.objects.create(
+        app=_existing_app(name="Atlassian Rovo", slug="atlassian-rovo"),
+        candidate_app=_existing_app(name="Atlassian Rovo", slug="atlassian"),
+        match_reason="shared_domain_similar_name",
+        score=0.98,
+        evidence={"domains": ["claude.com"], "name_similarity": 0.98},
+    )
+
+    out = StringIO()
+    call_command(
+        "dismiss_directory_duplicate_candidates",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    weak.refresh_from_db()
+    assert dry_run["would_dismiss"] == 1
+    assert dry_run["dismissed"] == 0
+    assert weak.status == DuplicateCandidate.Status.PENDING
+
+    out = StringIO()
+    call_command(
+        "dismiss_directory_duplicate_candidates",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    weak.refresh_from_db()
+    strong_name.refresh_from_db()
+    assert applied["would_dismiss"] == 1
+    assert applied["dismissed"] == 1
+    assert weak.status == DuplicateCandidate.Status.DISMISSED
+    assert weak.resolved_at is not None
+    assert strong_name.status == DuplicateCandidate.Status.PENDING
