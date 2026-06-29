@@ -384,3 +384,78 @@ Remaining Claude blockers after this run:
 - `atlassian`: `pending_duplicate_candidate`
 - `audible`: `pending_duplicate_candidate`
 - `aura`: `pending_duplicate_candidate`
+
+## Stage 5 follow-up — directory-host duplicate repair
+
+Production run on commit `c65294b`:
+
+- Deployed weak duplicate guardrail:
+  - shared directory hosts such as `claude.com` and `chatgpt.com` no longer
+    create `shared_domain_similar_name` candidates during ingest;
+  - existing pending false positives can be dismissed through
+    `dismiss_directory_duplicate_candidates`.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok;
+  - new management command available inside the `web` container.
+- Initial dry-run with `--limit=100` evaluated old GitHub/Gemini duplicate
+  candidates and dismissed nothing.
+- Expanded dry-run with `limit=5000`:
+  - `evaluated=3710`;
+  - `would_dismiss=24`;
+  - all matches were directory-host-only false positives on `claude.com` or
+    `chatgpt.com`;
+  - high-confidence same-name candidates such as `Atlassian Rovo` remained
+    pending.
+- Applied duplicate repair:
+  - `dismissed=24`.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=10`;
+- `would_publish=5`;
+- candidates:
+  - `aiera`;
+  - `airtable`;
+  - `airwallex`;
+  - `audible`;
+  - `aura`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=5`;
+- `App.status` counts after run: `draft=15180`, `published=20`;
+- Claude published count: `20`;
+- `LLMCallLog`: unchanged at `1287`;
+- total dismissed duplicate candidates: `24`.
+
+Newly published apps:
+
+- `aiera`
+- `airtable`
+- `airwallex`
+- `audible`
+- `aura`
+
+Validation:
+
+- All 5 public pages returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=30` returned
+  `count=20` and includes the new apps.
+- Public sitemap includes the new app URLs.
+
+Remaining Claude blockers after this run:
+
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `alltrails`: `short_description_lt_20`
+- `alma`: `category_required`
+- `amplitude`: MCP source/platform + short description
+- `atlassian`: `pending_duplicate_candidate`
