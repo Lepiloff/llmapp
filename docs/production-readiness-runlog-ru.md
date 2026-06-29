@@ -317,3 +317,70 @@ Remaining Claude blockers after the second batch:
 - `atlassian`: `pending_duplicate_candidate`
 - `audible`: `explicit_capabilities_lt_2`, `pending_duplicate_candidate`
 - `aura`: `pending_duplicate_candidate`
+
+## Stage 5 follow-up — trusted connector capability backfill
+
+Production run on commit `186cd4b`:
+
+- Deployed `backfill_trusted_connector_capabilities`.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok;
+  - new management command available inside the `web` container.
+- Claude-only capability backfill dry-run:
+  - `evaluated=23`;
+  - `would_update=22`.
+- Applied capability backfill:
+
+```bash
+python manage.py backfill_trusted_connector_capabilities \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=22`;
+- `updated_capabilities=38`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=11`;
+- `would_publish=1`;
+- candidate: `actively`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=1`;
+- newly published app: `actively`;
+- `App.status` counts after run: `draft=15185`, `published=15`;
+- Claude published count: `15`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Validation:
+
+- Public page `https://llmappmarket.com/apps/actively/` returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=20` returned
+  `count=15` and includes `actively`.
+- Public sitemap includes `https://llmappmarket.com/apps/actively/`.
+
+Remaining Claude blockers after this run:
+
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `aiera`: `pending_duplicate_candidate`
+- `airtable`: `pending_duplicate_candidate`
+- `airwallex`: `pending_duplicate_candidate`
+- `alltrails`: `short_description_lt_20`
+- `alma`: `category_required`
+- `amplitude`: MCP source/platform + short description
+- `atlassian`: `pending_duplicate_candidate`
+- `audible`: `pending_duplicate_candidate`
+- `aura`: `pending_duplicate_candidate`
