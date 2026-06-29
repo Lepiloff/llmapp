@@ -256,3 +256,64 @@ Validation:
   `count=4`.
 - Public sitemap includes all 4 app URLs with `llmappmarket.com`.
 - `/search/?q=adobe` and `/claude-connectors/` returned HTTP 200.
+
+## Stage 5 follow-up — second Claude autopublish batch
+
+Production run on commit `9850a52`:
+
+- Deployed verdict-prefix safety fix:
+  - verdict values starting with `PROPOSAL:`, `PROPOSED:`, or `DRAFT:` are
+    ignored instead of written to public `App.verdict`.
+- `/health/`: ok.
+- `LLMCallLog`: `1287 -> 1287`, no LLM calls.
+- Claude-only dry-run before apply:
+  - `published_count=4`;
+  - `evaluated=21`;
+  - `would_publish=10`.
+- Applied second Claude batch:
+
+```bash
+python manage.py autopublish_candidates --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published_before=4`;
+- `published_after=14`;
+- `published=10`;
+- `LLMCallLog`: `1287 -> 1287`.
+
+Newly published apps:
+
+- `adobe-experience-manager`
+- `adobe-creativity`
+- `adobe-marketing-agent`
+- `ahrefs`
+- `airops`
+- `aiwyn-tax`
+- `apollo`
+- `asana`
+- `attio`
+- `adobe-workfront`
+
+Validation:
+
+- All 10 new public pages returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=20` returned
+  `count=14`.
+- Public sitemap includes the new app URLs.
+
+Remaining Claude blockers after the second batch:
+
+- `actively`: `explicit_capabilities_lt_2`
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `aiera`: `pending_duplicate_candidate`
+- `airtable`: `pending_duplicate_candidate`
+- `airwallex`: `pending_duplicate_candidate`
+- `alltrails`: `short_description_lt_20`
+- `alma`: `category_required`, `explicit_capabilities_lt_2`
+- `amplitude`: MCP source/platform + short description
+- `atlassian`: `pending_duplicate_candidate`
+- `audible`: `explicit_capabilities_lt_2`, `pending_duplicate_candidate`
+- `aura`: `pending_duplicate_candidate`
