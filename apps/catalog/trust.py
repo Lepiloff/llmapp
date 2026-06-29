@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from django.db import transaction
 from django.db.models import Q
 
-from apps.catalog.models import App, AppCapability, Capability
+from apps.catalog.models import App, AppCapability, Capability, Category
 from apps.sources.models import Source
 
 TRUSTED_NON_MCP_SOURCE_TYPES = (
@@ -28,6 +28,18 @@ TRUSTED_CONNECTOR_CAPABILITY_DEFAULTS = {
         "sort_order": 50,
         "value": AppCapability.CapabilityValue.NO,
         "note": "Trusted cloud connector directory listing does not require local server setup.",
+    },
+}
+TRUSTED_CONNECTOR_CATEGORY_DEFAULTS = {
+    "health-wellness": {
+        "name": "Health & Wellness",
+        "sort_order": 110,
+    },
+}
+TRUSTED_CONNECTOR_SOURCE_CATEGORY_MAP = {
+    Source.SourceType.CLAUDE_CONNECTORS: {
+        "health and wellness": "health-wellness",
+        "healthcare": "health-wellness",
     },
 }
 
@@ -85,6 +97,40 @@ class TrustCapabilityBackfillDecision:
             "planned_updates": self.planned_updates,
             "updated_capabilities": self.updated_capabilities,
             "skipped_existing": self.skipped_existing,
+        }
+
+
+@dataclass(slots=True)
+class TrustCategoryBackfillDecision:
+    app_id: int
+    slug: str
+    name: str
+    source_types: list[str]
+    directory_urls: list[str]
+    source_categories: list[str]
+    planned_categories: list[str]
+    updated_categories: list[str] = field(default_factory=list)
+
+    @property
+    def would_update(self) -> bool:
+        return bool(self.planned_categories)
+
+    @property
+    def updated(self) -> bool:
+        return bool(self.updated_categories)
+
+    def as_dict(self) -> dict:
+        return {
+            "app_id": self.app_id,
+            "slug": self.slug,
+            "name": self.name,
+            "source_types": self.source_types,
+            "directory_urls": self.directory_urls,
+            "source_categories": self.source_categories,
+            "planned_categories": self.planned_categories,
+            "would_update": self.would_update,
+            "updated": self.updated,
+            "updated_categories": self.updated_categories,
         }
 
 
@@ -198,6 +244,34 @@ def trusted_connector_capabilities_backfill(
     }
 
 
+def trusted_connector_categories_backfill(
+    *,
+    source_types: tuple[str, ...] = TRUSTED_NON_MCP_SOURCE_TYPES,
+    limit: int = 100,
+    apply: bool = False,
+    include_mcp: bool = False,
+) -> dict:
+    decisions = list(
+        _trusted_connector_category_decisions(source_types, limit, include_mcp)
+    )
+    if apply:
+        for decision in decisions:
+            decision.updated_categories = _apply_trusted_category_backfill(
+                decision.app_id,
+                decision.planned_categories,
+            )
+    return {
+        "apply": apply,
+        "include_mcp": include_mcp,
+        "source_types": list(source_types),
+        "evaluated": len(decisions),
+        "would_update": sum(item.would_update for item in decisions),
+        "updated": sum(item.updated for item in decisions),
+        "updated_categories": sum(len(item.updated_categories) for item in decisions),
+        "results": [item.as_dict() for item in decisions],
+    }
+
+
 def _trusted_backfill_decisions(
     source_types: tuple[str, ...],
     limit: int,
@@ -246,6 +320,79 @@ def _trusted_backfill_decisions(
                 for source_type in source_values
                 for url in directory_urls
             ),
+        )
+
+
+def _trusted_connector_category_decisions(
+    source_types: tuple[str, ...],
+    limit: int,
+    include_mcp: bool,
+):
+    queryset = (
+        App.objects.filter(
+            sources__source_type__in=source_types,
+            sources__is_active=True,
+        )
+        .filter(_trusted_directory_query(source_types))
+        .prefetch_related("sources", "platform_links", "categories")
+        .distinct()
+        .order_by("first_seen_at", "pk")
+    )
+    if not include_mcp:
+        queryset = queryset.exclude(
+            Q(sources__source_type=Source.SourceType.MCP_REGISTRY)
+            | Q(platforms__slug="mcp")
+            | Q(listing_types__slug="mcp-server")
+        )
+
+    for app in queryset[:limit]:
+        source_values = list(
+            app.sources.filter(source_type__in=source_types, is_active=True)
+            .order_by("source_type")
+            .values_list("source_type", flat=True)
+            .distinct()
+        )
+        directory_urls = [
+            url
+            for url in app.platform_links.order_by("pk").values_list(
+                "official_directory_url", flat=True
+            )
+            if url
+        ]
+        if not any(
+            is_trusted_official_directory_url(source_type, url)
+            for source_type in source_values
+            for url in directory_urls
+        ):
+            continue
+
+        source_categories: list[str] = []
+        planned_categories: list[str] = []
+        existing_categories = set(app.categories.values_list("slug", flat=True))
+        for source in app.sources.filter(source_type__in=source_types, is_active=True):
+            payload = source.payload or {}
+            raw_categories = list((payload.get("card") or {}).get("categories") or [])
+            raw_categories += list(payload.get("unmapped_categories") or [])
+            mapping = TRUSTED_CONNECTOR_SOURCE_CATEGORY_MAP.get(source.source_type, {})
+            for category in raw_categories:
+                if category:
+                    source_categories.append(str(category))
+                slug = mapping.get(_normalize_source_category(category))
+                if (
+                    slug
+                    and slug not in existing_categories
+                    and slug not in planned_categories
+                ):
+                    planned_categories.append(slug)
+
+        yield TrustCategoryBackfillDecision(
+            app_id=app.pk,
+            slug=app.slug,
+            name=app.name,
+            source_types=source_values,
+            directory_urls=directory_urls,
+            source_categories=sorted(set(source_categories)),
+            planned_categories=planned_categories,
         )
 
 
@@ -351,6 +498,36 @@ def _apply_trust_backfill(app_id: int) -> bool:
 
 
 @transaction.atomic
+def _apply_trusted_category_backfill(
+    app_id: int,
+    planned_categories: list[str],
+) -> list[str]:
+    updated: list[str] = []
+    app = App.objects.select_for_update().get(pk=app_id)
+    existing_categories = set(app.categories.values_list("slug", flat=True))
+    for slug in planned_categories:
+        config = TRUSTED_CONNECTOR_CATEGORY_DEFAULTS.get(slug)
+        if config:
+            category, _ = Category.objects.get_or_create(
+                slug=slug,
+                defaults={
+                    "name": config["name"],
+                    "sort_order": config["sort_order"],
+                },
+            )
+        else:
+            category = Category.objects.filter(slug=slug).first()
+            if category is None:
+                continue
+        if slug in existing_categories:
+            continue
+        app.categories.add(category)
+        existing_categories.add(slug)
+        updated.append(slug)
+    return updated
+
+
+@transaction.atomic
 def _apply_trusted_capability_backfill(
     app_id: int,
     planned_updates: dict[str, str],
@@ -384,3 +561,7 @@ def _apply_trusted_capability_backfill(
         app_capability.save(update_fields=["value", "note"])
         updated.append(key)
     return updated
+
+
+def _normalize_source_category(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())

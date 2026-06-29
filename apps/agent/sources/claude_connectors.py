@@ -41,6 +41,8 @@ _ANTHROPIC_CATEGORY_MAP = {
     "documents": "files",
     "education": "research",
     "finance": "commerce",
+    "health and wellness": "health-wellness",
+    "healthcare": "health-wellness",
     "jobs": "productivity",
     "lifestyle": "productivity",
     "marketing": "marketing",

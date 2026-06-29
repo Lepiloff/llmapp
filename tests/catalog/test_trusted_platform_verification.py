@@ -338,3 +338,94 @@ def test_backfill_trusted_connector_capabilities_excludes_mcp_by_default() -> No
     result = json.loads(out.getvalue())
 
     assert result["would_update"] == 0
+
+
+def test_backfill_trusted_connector_categories_dry_run_then_apply() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Health Connector",
+        slug="health-connector",
+        short_description="A Claude connector for health and wellness data.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/health-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:health-connector",
+        payload={
+            "card": {"categories": ["Health and wellness"]},
+            "unmapped_categories": ["Health and wellness"],
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_categories",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["would_update"] == 1
+    assert dry_run["updated_categories"] == 0
+    assert dry_run["results"][0]["planned_categories"] == ["health-wellness"]
+    assert list(app.categories.values_list("slug", flat=True)) == []
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_categories",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app.refresh_from_db()
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert applied["updated_categories"] == 1
+    assert list(app.categories.values_list("slug", flat=True)) == ["health-wellness"]
+
+
+def test_backfill_trusted_connector_categories_excludes_mcp_by_default() -> None:
+    claude = _platform("claude")
+    mcp = _platform("mcp")
+    app = App.objects.create(
+        name="Mixed Health App",
+        slug="mixed-health-app",
+        short_description="A ChatGPT app that also has MCP platform metadata.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/mixed-health-app",
+    )
+    app.platforms.add(mcp)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:mixed-health-app",
+        payload={
+            "card": {"categories": ["Health and wellness"]},
+            "unmapped_categories": ["Health and wellness"],
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_categories",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    result = json.loads(out.getvalue())
+
+    assert result["would_update"] == 0

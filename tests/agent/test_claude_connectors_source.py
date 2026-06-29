@@ -52,8 +52,8 @@ def test_parses_claude_connector_into_draft() -> None:
     assert draft.official_page_url == "https://acme.example/connect"
     assert draft.platforms == ["claude"]
     assert draft.listing_types == ["claude-connector"]
-    assert draft.categories == ["developer-tools"]
-    assert draft.raw_payload["unmapped_categories"] == ["Healthcare"]
+    assert draft.categories == ["developer-tools", "health-wellness"]
+    assert draft.raw_payload["unmapped_categories"] == []
     assert draft.capabilities["read_data"] == "yes"
 
 

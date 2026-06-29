@@ -256,6 +256,11 @@ Checkpoint 2026-06-29:
   - `dismiss_directory_duplicate_candidates` умеет dry-run/apply закрывать
     уже созданные false positives только для `shared_domain_similar_name`,
     если score ниже порога настоящего name-match.
+- Добавлена taxonomy category `health-wellness` и mapping Claude source
+  `Health and wellness`/`Healthcare -> health-wellness`.
+- Добавлен dry-run/apply command `backfill_trusted_connector_categories`,
+  который добавляет только явно mapped категории из trusted connector
+  source payloads и исключает MCP/mixed MCP карточки по умолчанию.
 
 ### Stage 7 — Discovery и continuous growth
 
