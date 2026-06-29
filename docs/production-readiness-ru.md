@@ -234,6 +234,22 @@ Exit criteria:
 - Есть доказанный путь `ingest -> enrich -> quality gate -> publish`.
 - Понятно, какие поля/валидации мешают массовой публикации.
 
+Checkpoint 2026-06-29:
+
+- После первых Claude batches основной оставшийся технический блокер у
+  части trusted connectors: недостаточно явных capability rows, хотя
+  официальный cloud directory уже доказывает, что connector remote-hosted
+  и не требует локального server setup.
+- Добавлен dry-run/apply command
+  `backfill_trusted_connector_capabilities`, который для trusted
+  Claude/ChatGPT connector listings заполняет только отсутствующие или
+  `unknown` capability rows:
+  - `remote_available=yes`;
+  - `local_setup_required=no`.
+- Команда не перезаписывает существующие `yes/no`, исключает MCP/mixed MCP
+  карточки по умолчанию и должна запускаться после direct-ingest/backfill
+  перед очередным autopublish dry-run.
+
 ### Stage 7 — Discovery и continuous growth
 
 Цель: проверить поиск новых приложений после bootstrap.

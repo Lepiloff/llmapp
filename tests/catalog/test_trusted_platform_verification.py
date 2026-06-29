@@ -6,7 +6,7 @@ from io import StringIO
 import pytest
 from django.core.management import call_command
 
-from apps.catalog.models import App, AppPlatform, Platform
+from apps.catalog.models import App, AppCapability, AppPlatform, Capability, Platform
 from apps.sources.base import AppDraft
 from apps.sources.models import Source
 from apps.sources.upsert import upsert_app_from_draft
@@ -190,6 +190,147 @@ def test_backfill_excludes_mcp_platform_by_default() -> None:
     out = StringIO()
     call_command(
         "backfill_trusted_platform_verification",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    result = json.loads(out.getvalue())
+
+    assert result["would_update"] == 0
+
+
+def test_backfill_trusted_connector_capabilities_dry_run_then_apply() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Trusted Capabilities",
+        slug="trusted-capabilities",
+        short_description="A Claude connector ready for capability backfill.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/trusted-capabilities",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:trusted-capabilities",
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_capabilities",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["would_update"] == 1
+    assert dry_run["updated_capabilities"] == 0
+    assert dry_run["results"][0]["planned_updates"] == {
+        "local_setup_required": "no",
+        "remote_available": "yes",
+    }
+    assert AppCapability.objects.filter(app=app).count() == 0
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_capabilities",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    values = {
+        item.capability.key: item.value
+        for item in AppCapability.objects.filter(app=app).select_related("capability")
+    }
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert applied["updated_capabilities"] == 2
+    assert values["remote_available"] == AppCapability.CapabilityValue.YES
+    assert values["local_setup_required"] == AppCapability.CapabilityValue.NO
+
+
+def test_backfill_trusted_connector_capabilities_does_not_overwrite_known_values() -> None:
+    claude = _platform("claude")
+    remote = Capability.objects.create(
+        key="remote_available",
+        label="Hosted / remote available",
+    )
+    app = App.objects.create(
+        name="Manual Capability",
+        slug="manual-capability",
+        short_description="A Claude connector with a manual capability value.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/manual-capability",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:manual-capability",
+    )
+    AppCapability.objects.create(
+        app=app,
+        capability=remote,
+        value=AppCapability.CapabilityValue.NO,
+        note="Manual review found no hosted endpoint.",
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_capabilities",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app_remote = AppCapability.objects.get(app=app, capability=remote)
+    local_setup = AppCapability.objects.get(
+        app=app,
+        capability__key="local_setup_required",
+    )
+
+    assert applied["results"][0]["skipped_existing"] == {"remote_available": "no"}
+    assert app_remote.value == AppCapability.CapabilityValue.NO
+    assert app_remote.note == "Manual review found no hosted endpoint."
+    assert local_setup.value == AppCapability.CapabilityValue.NO
+
+
+def test_backfill_trusted_connector_capabilities_excludes_mcp_by_default() -> None:
+    chatgpt = _platform("chatgpt")
+    mcp = _platform("mcp")
+    app = App.objects.create(
+        name="Mixed Capability App",
+        slug="mixed-capability-app",
+        short_description="A ChatGPT app that also has MCP platform metadata.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=chatgpt,
+        official_directory_url="https://chatgpt.com/apps/mixed-capability-app",
+    )
+    app.platforms.add(mcp)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CHATGPT_UNOFFICIAL,
+        external_id="chatgpt:mixed-capability-app",
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_capabilities",
         "--limit=10",
         "--indent=0",
         stdout=out,
