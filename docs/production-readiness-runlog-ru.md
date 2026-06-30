@@ -459,3 +459,84 @@ Remaining Claude blockers after this run:
 - `alma`: `category_required`
 - `amplitude`: MCP source/platform + short description
 - `atlassian`: `pending_duplicate_candidate`
+
+## Stage 5 follow-up — trusted connector category backfill
+
+Production run on commit `ef810cd`:
+
+- Deployed taxonomy/category backfill:
+  - new category `health-wellness`;
+  - Claude source mapping `Health and wellness`/`Healthcare -> health-wellness`;
+  - new dry-run/apply command `backfill_trusted_connector_categories`.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok;
+  - category `health-wellness` exists in production DB;
+  - new management command available inside the `web` container.
+- Migration status:
+  - `python manage.py migrate --noinput` reported `No migrations to apply`;
+  - migration had already been applied by container startup.
+
+Claude-only category backfill dry-run:
+
+- `evaluated=23`;
+- `would_update=2`;
+- candidates:
+  - `alltrails -> health-wellness`;
+  - `alma -> health-wellness`.
+
+Applied category backfill:
+
+```bash
+python manage.py backfill_trusted_connector_categories \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=2`;
+- `updated_categories=2`.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=5`;
+- `would_publish=1`;
+- candidate: `alma`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=1`;
+- newly published app: `alma`;
+- `App.status` counts after run: `draft=15285`, `published=21`;
+- Claude published count: `21`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Validation:
+
+- Public page `https://llmappmarket.com/apps/alma/` returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=40` returned
+  `count=21` and includes `alma`.
+- Public sitemap includes:
+  - `https://llmappmarket.com/apps/alma/`;
+  - `https://llmappmarket.com/apps/health-wellness/`.
+
+Notes:
+
+- The draft count is higher than the previous checkpoint because production
+  now has `mcp_registry=14267` sources. This run did not invoke LLM; the
+  LLM call count remained `1287`.
+
+Remaining Claude blockers after this run:
+
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `alltrails`: `short_description_lt_20`
+- `amplitude`: MCP source/platform + short description
+- `atlassian`: `pending_duplicate_candidate`
