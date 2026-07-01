@@ -540,3 +540,76 @@ Remaining Claude blockers after this run:
 - `alltrails`: `short_description_lt_20`
 - `amplitude`: MCP source/platform + short description
 - `atlassian`: `pending_duplicate_candidate`
+
+## Stage 5 follow-up — trusted connector description backfill
+
+Production run on commit `f770af4`:
+
+- Deployed trusted connector description backfill:
+  - new dry-run/apply command `backfill_trusted_connector_descriptions`;
+  - description repair is limited to trusted non-MCP cloud connectors by
+    default;
+  - current short descriptions are only replaced when they are below the
+    minimum usable length and a better official source description is
+    available.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok;
+  - new management command available inside the `web` container.
+
+Claude-only description backfill dry-run:
+
+- `evaluated=23`;
+- `would_update=1`;
+- candidate:
+  - `alltrails -> Find your next outdoor adventure with AllTrails, directly in Claude.`
+
+Applied description backfill:
+
+```bash
+python manage.py backfill_trusted_connector_descriptions \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=1`;
+- updated app: `alltrails`.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=4`;
+- `would_publish=1`;
+- candidate: `alltrails`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=1`;
+- newly published app: `alltrails`;
+- `App.status` counts after run: `draft=15381`, `published=22`;
+- Claude published count: `22`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Validation:
+
+- Public page `https://llmappmarket.com/apps/alltrails/` returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=50` returned
+  `count=22` and includes `alltrails`.
+- Public sitemap includes:
+  - `https://llmappmarket.com/apps/alltrails/`;
+  - `https://llmappmarket.com/apps/travel/`;
+  - `https://llmappmarket.com/apps/health-wellness/`.
+
+Remaining Claude blockers after this run:
+
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `amplitude`: MCP source/platform + short description
+- `atlassian`: `pending_duplicate_candidate`
