@@ -429,3 +429,115 @@ def test_backfill_trusted_connector_categories_excludes_mcp_by_default() -> None
     result = json.loads(out.getvalue())
 
     assert result["would_update"] == 0
+
+
+def test_backfill_trusted_connector_descriptions_dry_run_then_apply() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Trail Connector",
+        slug="trail-connector",
+        short_description="Find trails",
+        long_description=(
+            "Find trails\n\nFind your next outdoor adventure with Trail Connector, "
+            "directly in Claude. Browse curated trail details and ratings."
+        ),
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/trail-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:trail-connector",
+        payload={
+            "detail": {
+                "long_description": (
+                    "Find trails\n\nFind your next outdoor adventure with Trail "
+                    "Connector, directly in Claude. Browse curated trail details."
+                )
+            },
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_descriptions",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["would_update"] == 1
+    assert dry_run["updated"] == 0
+    assert dry_run["results"][0]["planned_short_description"] == (
+        "Find your next outdoor adventure with Trail Connector, directly in Claude."
+    )
+    app.refresh_from_db()
+    assert app.short_description == "Find trails"
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_descriptions",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app.refresh_from_db()
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert app.short_description == (
+        "Find your next outdoor adventure with Trail Connector, directly in Claude."
+    )
+
+
+def test_backfill_trusted_connector_descriptions_keeps_usable_short_description() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Usable Connector",
+        slug="usable-connector",
+        short_description="A usable connector description",
+        long_description=(
+            "A better but unnecessary source-derived description for the connector."
+        ),
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/usable-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:usable-connector",
+        payload={
+            "detail": {
+                "long_description": (
+                    "A better but unnecessary source-derived description."
+                )
+            },
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_descriptions",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app.refresh_from_db()
+
+    assert applied["would_update"] == 0
+    assert applied["updated"] == 0
+    assert app.short_description == "A usable connector description"

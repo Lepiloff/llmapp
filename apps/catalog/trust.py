@@ -1,6 +1,7 @@
 """Trust-axis helpers for catalog source verification."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -42,6 +43,7 @@ TRUSTED_CONNECTOR_SOURCE_CATEGORY_MAP = {
         "healthcare": "health-wellness",
     },
 }
+TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH = 20
 
 
 @dataclass(slots=True)
@@ -131,6 +133,35 @@ class TrustCategoryBackfillDecision:
             "would_update": self.would_update,
             "updated": self.updated,
             "updated_categories": self.updated_categories,
+        }
+
+
+@dataclass(slots=True)
+class TrustDescriptionBackfillDecision:
+    app_id: int
+    slug: str
+    name: str
+    source_types: list[str]
+    directory_urls: list[str]
+    current_short_description: str
+    planned_short_description: str
+    updated: bool = False
+
+    @property
+    def would_update(self) -> bool:
+        return bool(self.planned_short_description)
+
+    def as_dict(self) -> dict:
+        return {
+            "app_id": self.app_id,
+            "slug": self.slug,
+            "name": self.name,
+            "source_types": self.source_types,
+            "directory_urls": self.directory_urls,
+            "current_short_description": self.current_short_description,
+            "planned_short_description": self.planned_short_description,
+            "would_update": self.would_update,
+            "updated": self.updated,
         }
 
 
@@ -272,6 +303,34 @@ def trusted_connector_categories_backfill(
     }
 
 
+def trusted_connector_descriptions_backfill(
+    *,
+    source_types: tuple[str, ...] = TRUSTED_NON_MCP_SOURCE_TYPES,
+    limit: int = 100,
+    apply: bool = False,
+    include_mcp: bool = False,
+) -> dict:
+    decisions = list(
+        _trusted_connector_description_decisions(source_types, limit, include_mcp)
+    )
+    if apply:
+        for decision in decisions:
+            if decision.would_update:
+                decision.updated = _apply_trusted_description_backfill(
+                    decision.app_id,
+                    decision.planned_short_description,
+                )
+    return {
+        "apply": apply,
+        "include_mcp": include_mcp,
+        "source_types": list(source_types),
+        "evaluated": len(decisions),
+        "would_update": sum(item.would_update for item in decisions),
+        "updated": sum(item.updated for item in decisions),
+        "results": [item.as_dict() for item in decisions],
+    }
+
+
 def _trusted_backfill_decisions(
     source_types: tuple[str, ...],
     limit: int,
@@ -320,6 +379,69 @@ def _trusted_backfill_decisions(
                 for source_type in source_values
                 for url in directory_urls
             ),
+        )
+
+
+def _trusted_connector_description_decisions(
+    source_types: tuple[str, ...],
+    limit: int,
+    include_mcp: bool,
+):
+    queryset = (
+        App.objects.filter(
+            sources__source_type__in=source_types,
+            sources__is_active=True,
+        )
+        .filter(_trusted_directory_query(source_types))
+        .prefetch_related("sources", "platform_links")
+        .distinct()
+        .order_by("first_seen_at", "pk")
+    )
+    if not include_mcp:
+        queryset = queryset.exclude(
+            Q(sources__source_type=Source.SourceType.MCP_REGISTRY)
+            | Q(platforms__slug="mcp")
+            | Q(listing_types__slug="mcp-server")
+        )
+
+    for app in queryset[:limit]:
+        source_values = list(
+            app.sources.filter(source_type__in=source_types, is_active=True)
+            .order_by("source_type")
+            .values_list("source_type", flat=True)
+            .distinct()
+        )
+        directory_urls = [
+            url
+            for url in app.platform_links.order_by("pk").values_list(
+                "official_directory_url", flat=True
+            )
+            if url
+        ]
+        if not any(
+            is_trusted_official_directory_url(source_type, url)
+            for source_type in source_values
+            for url in directory_urls
+        ):
+            continue
+
+        current_short = (app.short_description or "").strip()
+        planned_short = ""
+        if len(current_short) < TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+            source_long = _trusted_source_long_description(app, source_types)
+            planned_short = _short_description_from_long_description(
+                current_short=current_short,
+                long_description=source_long or app.long_description,
+            )
+
+        yield TrustDescriptionBackfillDecision(
+            app_id=app.pk,
+            slug=app.slug,
+            name=app.name,
+            source_types=source_values,
+            directory_urls=directory_urls,
+            current_short_description=current_short,
+            planned_short_description=planned_short,
         )
 
 
@@ -498,6 +620,22 @@ def _apply_trust_backfill(app_id: int) -> bool:
 
 
 @transaction.atomic
+def _apply_trusted_description_backfill(
+    app_id: int,
+    planned_short_description: str,
+) -> bool:
+    planned_short_description = planned_short_description.strip()[:280]
+    if not planned_short_description:
+        return False
+    app = App.objects.select_for_update().get(pk=app_id)
+    if len(app.short_description or "") >= TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+        return False
+    app.short_description = planned_short_description
+    app.save(update_fields=["short_description", "updated_at"])
+    return True
+
+
+@transaction.atomic
 def _apply_trusted_category_backfill(
     app_id: int,
     planned_categories: list[str],
@@ -565,3 +703,42 @@ def _apply_trusted_capability_backfill(
 
 def _normalize_source_category(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _trusted_source_long_description(
+    app: App,
+    source_types: tuple[str, ...],
+) -> str:
+    for source in app.sources.filter(source_type__in=source_types, is_active=True):
+        payload = source.payload or {}
+        detail_long = ((payload.get("detail") or {}).get("long_description") or "").strip()
+        if detail_long:
+            return detail_long
+    return ""
+
+
+def _short_description_from_long_description(
+    *,
+    current_short: str,
+    long_description: str,
+) -> str:
+    current_normalized = _normalize_description_line(current_short)
+    for block in re.split(r"\n+", long_description or ""):
+        candidate = _normalize_description_line(block)
+        if not candidate or candidate.lower() == current_normalized.lower():
+            continue
+        candidate = _first_sentence(candidate)
+        if len(candidate) >= TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+            return candidate[:280]
+    return ""
+
+
+def _normalize_description_line(value: str) -> str:
+    return " ".join((value or "").strip().split())
+
+
+def _first_sentence(value: str) -> str:
+    match = re.search(r"(?<=[.!?])\s+", value)
+    if match:
+        return value[: match.start()].strip()
+    return value.strip()

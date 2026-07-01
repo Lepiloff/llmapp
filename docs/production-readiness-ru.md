@@ -261,6 +261,10 @@ Checkpoint 2026-06-29:
 - Добавлен dry-run/apply command `backfill_trusted_connector_categories`,
   который добавляет только явно mapped категории из trusted connector
   source payloads и исключает MCP/mixed MCP карточки по умолчанию.
+- Добавлен dry-run/apply command `backfill_trusted_connector_descriptions`,
+  который для trusted connectors с `short_description < 20` выводит
+  source-backed короткое описание из первой содержательной фразы
+  `long_description` и не трогает уже пригодные описания.
 
 ### Stage 7 — Discovery и continuous growth
 
