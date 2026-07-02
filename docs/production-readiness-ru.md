@@ -265,6 +265,15 @@ Checkpoint 2026-06-29:
   который для trusted connectors с `short_description < 20` выводит
   source-backed короткое описание из первой содержательной фразы
   `long_description` и не трогает уже пригодные описания.
+- Добавлен dry-run/apply command `merge_cross_platform_duplicates`, который
+  закрывает exact-name non-MCP duplicate candidates через перенос source rows
+  и связей в более полную canonical карточку:
+  - по умолчанию работает только с двумя draft карточками и не трогает MCP;
+  - требует exact normalized name match и отсутствие других pending duplicate
+    candidates вокруг этих карточек;
+  - переносит platform/listing/category/capability/use_case и review/enrichment
+    данные, закрывает duplicate candidate как `confirmed`, а source-дубликат
+    оставляет `hidden`, чтобы не было cascade-delete потерь.
 
 ### Stage 7 — Discovery и continuous growth
 
