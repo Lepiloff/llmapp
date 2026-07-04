@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
 
 import pytest
@@ -322,3 +323,33 @@ def test_autopublish_command_requires_explicit_mcp_opt_in() -> None:
             Source.SourceType.MCP_REGISTRY,
             stdout=out,
         )
+
+
+def test_autopublish_command_targets_app_slug() -> None:
+    target = _candidate_app(slug="target-helper")
+    other = _candidate_app(slug="other-helper")
+    out = StringIO()
+
+    call_command(
+        "autopublish_candidates",
+        "--source-type",
+        Source.SourceType.GEMINI_EXTENSIONS,
+        "--app-slug",
+        target.slug,
+        "--limit",
+        "10",
+        "--apply",
+        "--indent",
+        "0",
+        stdout=out,
+    )
+
+    result = json.loads(out.getvalue())
+    target.refresh_from_db()
+    other.refresh_from_db()
+    assert result["app_slugs"] == [target.slug]
+    assert result["evaluated"] == 1
+    assert result["published"] == 1
+    assert result["results"][0]["slug"] == target.slug
+    assert target.status == App.AppStatus.PUBLISHED
+    assert other.status == App.AppStatus.DRAFT

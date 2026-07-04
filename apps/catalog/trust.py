@@ -372,9 +372,17 @@ def trusted_connector_descriptions_backfill(
     limit: int = 100,
     apply: bool = False,
     include_mcp: bool = False,
+    min_length: int = TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH,
+    app_slugs: tuple[str, ...] = (),
 ) -> dict:
     decisions = list(
-        _trusted_connector_description_decisions(source_types, limit, include_mcp)
+        _trusted_connector_description_decisions(
+            source_types,
+            limit,
+            include_mcp,
+            min_length,
+            app_slugs,
+        )
     )
     if apply:
         for decision in decisions:
@@ -382,10 +390,13 @@ def trusted_connector_descriptions_backfill(
                 decision.updated = _apply_trusted_description_backfill(
                     decision.app_id,
                     decision.planned_short_description,
+                    min_length,
                 )
     return {
         "apply": apply,
         "include_mcp": include_mcp,
+        "min_length": min_length,
+        "app_slugs": list(app_slugs),
         "source_types": list(source_types),
         "evaluated": len(decisions),
         "would_update": sum(item.would_update for item in decisions),
@@ -584,6 +595,8 @@ def _trusted_connector_description_decisions(
     source_types: tuple[str, ...],
     limit: int,
     include_mcp: bool,
+    min_length: int,
+    app_slugs: tuple[str, ...],
 ):
     queryset = (
         App.objects.filter(
@@ -601,6 +614,8 @@ def _trusted_connector_description_decisions(
             | Q(platforms__slug="mcp")
             | Q(listing_types__slug="mcp-server")
         )
+    if app_slugs:
+        queryset = queryset.filter(slug__in=app_slugs)
 
     for app in queryset[:limit]:
         source_values = list(
@@ -625,11 +640,12 @@ def _trusted_connector_description_decisions(
 
         current_short = (app.short_description or "").strip()
         planned_short = ""
-        if len(current_short) < TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+        if len(current_short) < min_length:
             source_long = _trusted_source_long_description(app, source_types)
             planned_short = _short_description_from_long_description(
                 current_short=current_short,
                 long_description=source_long or app.long_description,
+                min_length=min_length,
             )
 
         yield TrustDescriptionBackfillDecision(
@@ -874,12 +890,13 @@ def _apply_trusted_launch_status_backfill(
 def _apply_trusted_description_backfill(
     app_id: int,
     planned_short_description: str,
+    min_length: int,
 ) -> bool:
     planned_short_description = planned_short_description.strip()[:280]
     if not planned_short_description:
         return False
     app = App.objects.select_for_update().get(pk=app_id)
-    if len(app.short_description or "") >= TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+    if len(app.short_description or "") >= min_length:
         return False
     app.short_description = planned_short_description
     app.save(update_fields=["short_description", "updated_at"])
@@ -1006,6 +1023,7 @@ def _short_description_from_long_description(
     *,
     current_short: str,
     long_description: str,
+    min_length: int = TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH,
 ) -> str:
     current_normalized = _normalize_description_line(current_short)
     for block in re.split(r"\n+", long_description or ""):
@@ -1013,7 +1031,7 @@ def _short_description_from_long_description(
         if not candidate or candidate.lower() == current_normalized.lower():
             continue
         candidate = _first_sentence(candidate)
-        if len(candidate) >= TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+        if len(candidate) >= min_length:
             return candidate[:280]
     return ""
 

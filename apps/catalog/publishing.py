@@ -103,8 +103,12 @@ def normalize_autopublish_source_types(source_types: list[str]) -> tuple[str, ..
     return tuple(dict.fromkeys(normalized))
 
 
-def autopublish_candidates_queryset(source_types: tuple[str, ...]):
-    return (
+def autopublish_candidates_queryset(
+    source_types: tuple[str, ...],
+    *,
+    app_slugs: tuple[str, ...] = (),
+):
+    queryset = (
         App.objects.filter(
             status=App.AppStatus.DRAFT,
             sources__source_type__in=source_types,
@@ -113,6 +117,9 @@ def autopublish_candidates_queryset(source_types: tuple[str, ...]):
         .distinct()
         .order_by("first_seen_at", "pk")
     )
+    if app_slugs:
+        queryset = queryset.filter(slug__in=app_slugs)
+    return queryset
 
 
 def evaluate_autopublish_candidate(
@@ -162,8 +169,12 @@ def autopublish_batch(
     limit: int = 50,
     apply: bool = False,
     auto_review: bool = True,
+    app_slugs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    queryset = autopublish_candidates_queryset(source_types)[:limit]
+    queryset = autopublish_candidates_queryset(
+        source_types,
+        app_slugs=app_slugs,
+    )[:limit]
     decisions = [
         evaluate_autopublish_candidate(
             app,
@@ -193,6 +204,7 @@ def autopublish_batch(
     return {
         "apply": apply,
         "source_types": list(source_types),
+        "app_slugs": list(app_slugs),
         "evaluated": len(decisions),
         "would_publish": sum(1 for item in decisions if item.would_publish),
         "published": sum(1 for item in decisions if item.published),

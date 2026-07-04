@@ -265,6 +265,12 @@ Checkpoint 2026-06-29:
   который для trusted connectors с `short_description < 20` выводит
   source-backed короткое описание из первой содержательной фразы
   `long_description` и не трогает уже пригодные описания.
+- Для mixed trusted connector карточек добавлены точечные guardrails:
+  `backfill_trusted_connector_descriptions --app-slug <slug> --min-length 60
+  --include-mcp` позволяет поднять описание конкретной карточки до общего
+  publish gate, а `autopublish_candidates --app-slug <slug> --include-mcp`
+  позволяет dry-run/apply только выбранный app без публикации соседних MCP
+  кандидатов.
 - Добавлен dry-run/apply command `merge_cross_platform_duplicates`, который
   закрывает exact-name non-MCP duplicate candidates через перенос source rows
   и связей в более полную canonical карточку:

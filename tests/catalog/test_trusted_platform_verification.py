@@ -550,6 +550,121 @@ def test_backfill_trusted_connector_descriptions_keeps_usable_short_description(
     assert app.short_description == "A usable connector description"
 
 
+def test_backfill_trusted_connector_descriptions_targets_mixed_mcp_slug() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Amplitude",
+        slug="amplitude",
+        short_description="Give your teams powerful behavioral insights",
+        long_description=(
+            "Give your teams powerful behavioral insights\n\n"
+            "Connect your workflows to Amplitude's powerful behavior analytics "
+            "and experimentation platform."
+        ),
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    other = App.objects.create(
+        name="Other Connector",
+        slug="other-connector",
+        short_description="Short but deliberately not targeted",
+        long_description=(
+            "Short but deliberately not targeted\n\n"
+            "This source-backed description is long enough to be useful."
+        ),
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/amplitude",
+    )
+    AppPlatform.objects.create(
+        app=other,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/other-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:amplitude",
+        payload={
+            "detail": {
+                "long_description": (
+                    "Give your teams powerful behavioral insights\n\n"
+                    "Connect your workflows to Amplitude's powerful behavior "
+                    "analytics and experimentation platform."
+                )
+            },
+        },
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp:amplitude",
+    )
+    Source.objects.create(
+        app=other,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:other-connector",
+        payload={
+            "detail": {
+                "long_description": (
+                    "Short but deliberately not targeted\n\n"
+                    "This source-backed description is long enough to be useful."
+                )
+            },
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_descriptions",
+        "--source-type=claude_connectors",
+        "--include-mcp",
+        "--app-slug=amplitude",
+        "--min-length=60",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["app_slugs"] == ["amplitude"]
+    assert dry_run["min_length"] == 60
+    assert dry_run["would_update"] == 1
+    assert dry_run["results"][0]["planned_short_description"] == (
+        "Connect your workflows to Amplitude's powerful behavior analytics "
+        "and experimentation platform."
+    )
+    app.refresh_from_db()
+    other.refresh_from_db()
+    assert app.short_description == "Give your teams powerful behavioral insights"
+    assert other.short_description == "Short but deliberately not targeted"
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_descriptions",
+        "--source-type=claude_connectors",
+        "--include-mcp",
+        "--app-slug=amplitude",
+        "--min-length=60",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app.refresh_from_db()
+    other.refresh_from_db()
+
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert app.short_description == (
+        "Connect your workflows to Amplitude's powerful behavior analytics "
+        "and experimentation platform."
+    )
+    assert other.short_description == "Short but deliberately not targeted"
+
+
 def test_repair_trusted_connector_mcp_taxonomy_dry_run_then_apply() -> None:
     claude = _platform("claude")
     cloud_listing = ListingType.objects.create(

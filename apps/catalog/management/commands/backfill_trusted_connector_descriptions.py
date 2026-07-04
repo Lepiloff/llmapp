@@ -6,6 +6,7 @@ import json
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.catalog.trust import (
+    TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH,
     TRUSTED_NON_MCP_SOURCE_TYPES,
     trusted_connector_descriptions_backfill,
 )
@@ -39,6 +40,21 @@ class Command(BaseCommand):
             help="Maximum apps to evaluate.",
         )
         parser.add_argument(
+            "--app-slug",
+            action="append",
+            default=[],
+            help="Only evaluate a specific app slug. Repeatable.",
+        )
+        parser.add_argument(
+            "--min-length",
+            type=int,
+            default=TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH,
+            help=(
+                "Minimum acceptable short description length. Defaults to "
+                f"{TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH}."
+            ),
+        )
+        parser.add_argument(
             "--apply",
             action="store_true",
             help="Persist derived short descriptions.",
@@ -59,6 +75,12 @@ class Command(BaseCommand):
         limit = options["limit"]
         if limit < 1:
             raise CommandError("--limit must be >= 1")
+        min_length = options["min_length"]
+        if min_length < TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH:
+            raise CommandError(
+                "--min-length must be >= "
+                f"{TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH}"
+            )
 
         source_types = tuple(options["source_type"] or TRUSTED_NON_MCP_SOURCE_TYPES)
         result = trusted_connector_descriptions_backfill(
@@ -66,6 +88,8 @@ class Command(BaseCommand):
             limit=limit,
             apply=options["apply"],
             include_mcp=options["include_mcp"],
+            min_length=min_length,
+            app_slugs=tuple(options["app_slug"]),
         )
         indent = None if options["indent"] == 0 else options["indent"]
         self.stdout.write(json.dumps(result, indent=indent, sort_keys=True))

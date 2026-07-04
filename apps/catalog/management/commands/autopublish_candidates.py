@@ -35,6 +35,12 @@ class Command(BaseCommand):
             help="Maximum draft apps to evaluate.",
         )
         parser.add_argument(
+            "--app-slug",
+            action="append",
+            default=[],
+            help="Only evaluate a specific app slug. Repeatable.",
+        )
+        parser.add_argument(
             "--apply",
             action="store_true",
             help="Publish candidates that pass the policy.",
@@ -79,6 +85,7 @@ class Command(BaseCommand):
             limit=limit,
             apply=options["apply"],
             auto_review=not options["no_auto_review"],
+            app_slugs=tuple(options["app_slug"]),
         )
         indent = None if options["indent"] == 0 else options["indent"]
         self.stdout.write(json.dumps(result, indent=indent, sort_keys=True))
