@@ -613,3 +613,99 @@ Remaining Claude blockers after this run:
   launch-status review change
 - `amplitude`: MCP source/platform + short description
 - `atlassian`: `pending_duplicate_candidate`
+
+## Stage 5 follow-up — exact cross-platform duplicate merge
+
+Production run on commit `f02c8ca`:
+
+- Deployed exact-name cross-platform duplicate merge:
+  - new dry-run/apply command `merge_cross_platform_duplicates`;
+  - default guardrails require non-MCP, two draft cards, exact normalized name
+    match, no related pending duplicate candidates, and no capability conflicts;
+  - source duplicate is left `hidden` instead of deleted to avoid cascade data
+    loss.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok after Gunicorn finished booting;
+  - new management command available inside the `web` container.
+
+Global duplicate dry-run:
+
+- `evaluated=100`;
+- `would_merge=0`;
+- result confirmed the command is conservative on the old broad duplicate
+  queue because the first 100 rows are blocked by non-exact names, MCP identity,
+  related pending candidates, or capability conflicts.
+
+Targeted Atlassian dry-run:
+
+- duplicate candidate `3702`;
+- `app=atlassian-rovo`;
+- `candidate=atlassian`;
+- `target=atlassian-rovo`;
+- `source=atlassian`;
+- `would_merge=true`;
+- blockers: none.
+
+Applied targeted duplicate merge:
+
+```python
+apply_duplicate_merge(3702, include_mcp=False)
+```
+
+Result:
+
+- `merged=true`;
+- moved `sources=2`;
+- merged `platforms=1`, `categories=1`, `capabilities=13`, `use_cases=1`;
+- moved `review_entries=1`, `enrichment_tasks=1`;
+- duplicate candidate `3702` resolved as `confirmed`;
+- source duplicate `atlassian` set to `hidden`;
+- pending duplicate candidates around `atlassian` / `atlassian-rovo`: `0`.
+
+Post-merge data repair:
+
+- Claude platform link on `atlassian-rovo` was corrected to
+  `https://claude.com/connectors/atlassian`.
+- Empty ChatGPT/Claude platform `scope_summary` values were filled with the
+  merged cross-platform summary.
+- Review entry `195` was accepted.
+- Review entry `9` was resolved as `no_action` because it was superseded by
+  the merged scope summary.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=3`;
+- `would_publish=1`;
+- candidate: `atlassian-rovo`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=1`;
+- newly published app: `atlassian-rovo`;
+- `App.status` counts after run: `draft=15894`, `hidden=1`, `published=23`;
+- Claude published count: `23`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Validation:
+
+- Public page `https://llmappmarket.com/apps/atlassian-rovo/` returned HTTP
+  200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=60` returned
+  `count=23` and includes `atlassian-rovo`.
+- Public API shows `atlassian-rovo` on both `chatgpt` and `claude`.
+- Public sitemap includes:
+  - `https://llmappmarket.com/apps/atlassian-rovo/`.
+
+Remaining Claude blockers after this run:
+
+- `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
+  launch-status review change
+- `amplitude`: MCP source/platform + short description
