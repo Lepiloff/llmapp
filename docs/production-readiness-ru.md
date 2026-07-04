@@ -274,6 +274,15 @@ Checkpoint 2026-06-29:
   - переносит platform/listing/category/capability/use_case и review/enrichment
     данные, закрывает duplicate candidate как `confirmed`, а source-дубликат
     оставляет `hidden`, чтобы не было cascade-delete потерь.
+- Добавлен dry-run/apply command `repair_trusted_connector_mcp_taxonomy`,
+  который убирает ложный `mcp-server` listing type у trusted cloud connector
+  карточек, если у них нет MCP Registry source и MCP platform. Это закрывает
+  случаи, где LLM воспринял текст вида "MCP server" внутри официальной Claude
+  connector страницы как отдельную MCP listing taxonomy.
+- Добавлен dry-run/apply command `backfill_trusted_connector_launch_statuses`,
+  который source-backed выставляет `launch_status=beta`, если официальный
+  trusted connector текст явно содержит `in beta`. Реальные MCP source/platform
+  карточки исключаются по умолчанию.
 
 ### Stage 7 — Discovery и continuous growth
 

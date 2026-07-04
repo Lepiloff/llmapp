@@ -6,7 +6,14 @@ from io import StringIO
 import pytest
 from django.core.management import call_command
 
-from apps.catalog.models import App, AppCapability, AppPlatform, Capability, Platform
+from apps.catalog.models import (
+    App,
+    AppCapability,
+    AppPlatform,
+    Capability,
+    ListingType,
+    Platform,
+)
 from apps.sources.base import AppDraft
 from apps.sources.models import Source
 from apps.sources.upsert import upsert_app_from_draft
@@ -541,3 +548,209 @@ def test_backfill_trusted_connector_descriptions_keeps_usable_short_description(
     assert applied["would_update"] == 0
     assert applied["updated"] == 0
     assert app.short_description == "A usable connector description"
+
+
+def test_repair_trusted_connector_mcp_taxonomy_dry_run_then_apply() -> None:
+    claude = _platform("claude")
+    cloud_listing = ListingType.objects.create(
+        slug="claude-connector",
+        name="Claude Connector",
+    )
+    mcp_listing = ListingType.objects.create(
+        slug="mcp-server",
+        name="MCP Server",
+    )
+    app = App.objects.create(
+        name="False MCP Connector",
+        slug="false-mcp-connector",
+        short_description="A Claude connector with a false MCP listing type.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/false-mcp-connector",
+    )
+    app.listing_types.add(cloud_listing, mcp_listing)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:false-mcp-connector",
+    )
+
+    out = StringIO()
+    call_command(
+        "repair_trusted_connector_mcp_taxonomy",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["would_update"] == 1
+    assert dry_run["updated_listing_types"] == 0
+    assert dry_run["results"][0]["planned_remove_listing_types"] == ["mcp-server"]
+    assert set(app.listing_types.values_list("slug", flat=True)) == {
+        "claude-connector",
+        "mcp-server",
+    }
+
+    out = StringIO()
+    call_command(
+        "repair_trusted_connector_mcp_taxonomy",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert applied["updated_listing_types"] == 1
+    assert list(app.listing_types.values_list("slug", flat=True)) == [
+        "claude-connector"
+    ]
+
+
+def test_repair_trusted_connector_mcp_taxonomy_excludes_mcp_platform() -> None:
+    claude = _platform("claude")
+    mcp = _platform("mcp")
+    cloud_listing = ListingType.objects.create(
+        slug="claude-connector",
+        name="Claude Connector",
+    )
+    mcp_listing = ListingType.objects.create(
+        slug="mcp-server",
+        name="MCP Server",
+    )
+    app = App.objects.create(
+        name="Real MCP Connector",
+        slug="real-mcp-connector",
+        short_description="A Claude connector with real MCP platform metadata.",
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/real-mcp-connector",
+    )
+    app.platforms.add(mcp)
+    app.listing_types.add(cloud_listing, mcp_listing)
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:real-mcp-connector",
+    )
+
+    out = StringIO()
+    call_command(
+        "repair_trusted_connector_mcp_taxonomy",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    result = json.loads(out.getvalue())
+
+    assert result["would_update"] == 0
+    assert app.listing_types.filter(slug="mcp-server").exists()
+
+
+def test_backfill_trusted_connector_launch_statuses_dry_run_then_apply() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Beta Connector",
+        slug="beta-connector",
+        short_description="A Claude connector whose source says it is beta.",
+        launch_status=App.LaunchStatus.LIVE,
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/beta-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:beta-connector",
+        payload={
+            "detail": {
+                "long_description": (
+                    "Use Beta Connector from Claude.\n\n"
+                    "The Beta Connector server is in beta."
+                )
+            }
+        },
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_launch_statuses",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--indent=0",
+        stdout=out,
+    )
+    dry_run = json.loads(out.getvalue())
+    assert dry_run["would_update"] == 1
+    assert dry_run["updated"] == 0
+    assert dry_run["results"][0]["planned_launch_status"] == "beta"
+    app.refresh_from_db()
+    assert app.launch_status == App.LaunchStatus.LIVE
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_launch_statuses",
+        "--source-type=claude_connectors",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    applied = json.loads(out.getvalue())
+    app.refresh_from_db()
+    assert applied["would_update"] == 1
+    assert applied["updated"] == 1
+    assert app.launch_status == App.LaunchStatus.BETA
+
+
+def test_backfill_trusted_connector_launch_statuses_excludes_mcp_source() -> None:
+    claude = _platform("claude")
+    app = App.objects.create(
+        name="Mixed Beta Connector",
+        slug="mixed-beta-connector",
+        short_description="A mixed connector whose source says it is beta.",
+        launch_status=App.LaunchStatus.LIVE,
+        platform_verification_status=App.PlatformVerificationStatus.OFFICIAL,
+    )
+    AppPlatform.objects.create(
+        app=app,
+        platform=claude,
+        official_directory_url="https://claude.com/connectors/mixed-beta-connector",
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.CLAUDE_CONNECTORS,
+        external_id="claude:mixed-beta-connector",
+        payload={"detail": {"long_description": "The connector is in beta."}},
+    )
+    Source.objects.create(
+        app=app,
+        source_type=Source.SourceType.MCP_REGISTRY,
+        external_id="mcp:mixed-beta-connector",
+    )
+
+    out = StringIO()
+    call_command(
+        "backfill_trusted_connector_launch_statuses",
+        "--limit=10",
+        "--apply",
+        "--indent=0",
+        stdout=out,
+    )
+    result = json.loads(out.getvalue())
+    app.refresh_from_db()
+
+    assert result["would_update"] == 0
+    assert app.launch_status == App.LaunchStatus.LIVE

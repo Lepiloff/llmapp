@@ -44,6 +44,8 @@ TRUSTED_CONNECTOR_SOURCE_CATEGORY_MAP = {
     },
 }
 TRUSTED_CONNECTOR_MIN_SHORT_DESCRIPTION_LENGTH = 20
+TRUSTED_CONNECTOR_FALSE_MCP_LISTING_TYPES = ("mcp-server",)
+TRUSTED_CONNECTOR_CLOUD_LISTING_TYPES = ("claude-connector", "chatgpt-app")
 
 
 @dataclass(slots=True)
@@ -160,6 +162,67 @@ class TrustDescriptionBackfillDecision:
             "directory_urls": self.directory_urls,
             "current_short_description": self.current_short_description,
             "planned_short_description": self.planned_short_description,
+            "would_update": self.would_update,
+            "updated": self.updated,
+        }
+
+
+@dataclass(slots=True)
+class TrustMcpTaxonomyRepairDecision:
+    app_id: int
+    slug: str
+    name: str
+    source_types: list[str]
+    directory_urls: list[str]
+    planned_remove_listing_types: list[str]
+    updated_listing_types: list[str] = field(default_factory=list)
+
+    @property
+    def would_update(self) -> bool:
+        return bool(self.planned_remove_listing_types)
+
+    @property
+    def updated(self) -> bool:
+        return bool(self.updated_listing_types)
+
+    def as_dict(self) -> dict:
+        return {
+            "app_id": self.app_id,
+            "slug": self.slug,
+            "name": self.name,
+            "source_types": self.source_types,
+            "directory_urls": self.directory_urls,
+            "planned_remove_listing_types": self.planned_remove_listing_types,
+            "would_update": self.would_update,
+            "updated": self.updated,
+            "updated_listing_types": self.updated_listing_types,
+        }
+
+
+@dataclass(slots=True)
+class TrustLaunchStatusBackfillDecision:
+    app_id: int
+    slug: str
+    name: str
+    source_types: list[str]
+    directory_urls: list[str]
+    current_launch_status: str
+    planned_launch_status: str
+    updated: bool = False
+
+    @property
+    def would_update(self) -> bool:
+        return bool(self.planned_launch_status)
+
+    def as_dict(self) -> dict:
+        return {
+            "app_id": self.app_id,
+            "slug": self.slug,
+            "name": self.name,
+            "source_types": self.source_types,
+            "directory_urls": self.directory_urls,
+            "current_launch_status": self.current_launch_status,
+            "planned_launch_status": self.planned_launch_status,
             "would_update": self.would_update,
             "updated": self.updated,
         }
@@ -331,6 +394,59 @@ def trusted_connector_descriptions_backfill(
     }
 
 
+def trusted_connector_mcp_taxonomy_repair(
+    *,
+    source_types: tuple[str, ...] = TRUSTED_NON_MCP_SOURCE_TYPES,
+    limit: int = 100,
+    apply: bool = False,
+) -> dict:
+    decisions = list(_trusted_connector_mcp_taxonomy_decisions(source_types, limit))
+    if apply:
+        for decision in decisions:
+            if decision.would_update:
+                decision.updated_listing_types = _apply_trusted_mcp_taxonomy_repair(
+                    decision.app_id,
+                    decision.planned_remove_listing_types,
+                    source_types,
+                )
+    return {
+        "apply": apply,
+        "source_types": list(source_types),
+        "evaluated": len(decisions),
+        "would_update": sum(item.would_update for item in decisions),
+        "updated": sum(item.updated for item in decisions),
+        "updated_listing_types": sum(
+            len(item.updated_listing_types) for item in decisions
+        ),
+        "results": [item.as_dict() for item in decisions],
+    }
+
+
+def trusted_connector_launch_statuses_backfill(
+    *,
+    source_types: tuple[str, ...] = TRUSTED_NON_MCP_SOURCE_TYPES,
+    limit: int = 100,
+    apply: bool = False,
+) -> dict:
+    decisions = list(_trusted_connector_launch_status_decisions(source_types, limit))
+    if apply:
+        for decision in decisions:
+            if decision.would_update:
+                decision.updated = _apply_trusted_launch_status_backfill(
+                    decision.app_id,
+                    decision.planned_launch_status,
+                    source_types,
+                )
+    return {
+        "apply": apply,
+        "source_types": list(source_types),
+        "evaluated": len(decisions),
+        "would_update": sum(item.would_update for item in decisions),
+        "updated": sum(item.updated for item in decisions),
+        "results": [item.as_dict() for item in decisions],
+    }
+
+
 def _trusted_backfill_decisions(
     source_types: tuple[str, ...],
     limit: int,
@@ -379,6 +495,88 @@ def _trusted_backfill_decisions(
                 for source_type in source_values
                 for url in directory_urls
             ),
+        )
+
+
+def _trusted_connector_mcp_taxonomy_decisions(
+    source_types: tuple[str, ...],
+    limit: int,
+):
+    queryset = (
+        App.objects.filter(
+            sources__source_type__in=source_types,
+            sources__is_active=True,
+            listing_types__slug__in=TRUSTED_CONNECTOR_FALSE_MCP_LISTING_TYPES,
+        )
+        .filter(_trusted_directory_query(source_types))
+        .filter(listing_types__slug__in=TRUSTED_CONNECTOR_CLOUD_LISTING_TYPES)
+        .exclude(
+            Q(sources__source_type=Source.SourceType.MCP_REGISTRY)
+            | Q(platforms__slug="mcp")
+        )
+        .prefetch_related("sources", "platform_links", "listing_types")
+        .distinct()
+        .order_by("first_seen_at", "pk")
+    )
+
+    for app in queryset[:limit]:
+        source_values = _trusted_source_values(app, source_types)
+        directory_urls = _trusted_directory_urls(app)
+        if not _has_trusted_directory(source_values, directory_urls):
+            continue
+        planned_remove = list(
+            app.listing_types.filter(
+                slug__in=TRUSTED_CONNECTOR_FALSE_MCP_LISTING_TYPES
+            )
+            .order_by("slug")
+            .values_list("slug", flat=True)
+        )
+        yield TrustMcpTaxonomyRepairDecision(
+            app_id=app.pk,
+            slug=app.slug,
+            name=app.name,
+            source_types=source_values,
+            directory_urls=directory_urls,
+            planned_remove_listing_types=planned_remove,
+        )
+
+
+def _trusted_connector_launch_status_decisions(
+    source_types: tuple[str, ...],
+    limit: int,
+):
+    queryset = (
+        App.objects.filter(
+            sources__source_type__in=source_types,
+            sources__is_active=True,
+        )
+        .filter(_trusted_directory_query(source_types))
+        .exclude(
+            Q(sources__source_type=Source.SourceType.MCP_REGISTRY)
+            | Q(platforms__slug="mcp")
+        )
+        .prefetch_related("sources", "platform_links")
+        .distinct()
+        .order_by("first_seen_at", "pk")
+    )
+
+    for app in queryset[:limit]:
+        source_values = _trusted_source_values(app, source_types)
+        directory_urls = _trusted_directory_urls(app)
+        if not _has_trusted_directory(source_values, directory_urls):
+            continue
+        source_text = _trusted_source_long_description(app, source_types)
+        planned_status = _launch_status_from_source_text(source_text)
+        if planned_status == app.launch_status:
+            planned_status = ""
+        yield TrustLaunchStatusBackfillDecision(
+            app_id=app.pk,
+            slug=app.slug,
+            name=app.name,
+            source_types=source_values,
+            directory_urls=directory_urls,
+            current_launch_status=app.launch_status,
+            planned_launch_status=planned_status,
         )
 
 
@@ -620,6 +818,59 @@ def _apply_trust_backfill(app_id: int) -> bool:
 
 
 @transaction.atomic
+def _apply_trusted_mcp_taxonomy_repair(
+    app_id: int,
+    listing_type_slugs: list[str],
+    source_types: tuple[str, ...],
+) -> list[str]:
+    app = App.objects.select_for_update().get(pk=app_id)
+    if app.sources.filter(source_type=Source.SourceType.MCP_REGISTRY).exists():
+        return []
+    if app.platforms.filter(slug="mcp").exists():
+        return []
+    if not app.listing_types.filter(
+        slug__in=TRUSTED_CONNECTOR_CLOUD_LISTING_TYPES
+    ).exists():
+        return []
+    source_values = _trusted_source_values(app, source_types)
+    directory_urls = _trusted_directory_urls(app)
+    if not _has_trusted_directory(source_values, directory_urls):
+        return []
+
+    rows = list(app.listing_types.filter(slug__in=listing_type_slugs))
+    if rows:
+        app.listing_types.remove(*rows)
+    return [row.slug for row in rows]
+
+
+@transaction.atomic
+def _apply_trusted_launch_status_backfill(
+    app_id: int,
+    planned_launch_status: str,
+    source_types: tuple[str, ...],
+) -> bool:
+    if planned_launch_status not in App.LaunchStatus.values:
+        return False
+    app = App.objects.select_for_update().get(pk=app_id)
+    if app.sources.filter(source_type=Source.SourceType.MCP_REGISTRY).exists():
+        return False
+    if app.platforms.filter(slug="mcp").exists():
+        return False
+    if app.launch_status == planned_launch_status:
+        return False
+    source_values = _trusted_source_values(app, source_types)
+    directory_urls = _trusted_directory_urls(app)
+    if not _has_trusted_directory(source_values, directory_urls):
+        return False
+    source_text = _trusted_source_long_description(app, source_types)
+    if _launch_status_from_source_text(source_text) != planned_launch_status:
+        return False
+    app.launch_status = planned_launch_status
+    app.save(update_fields=["launch_status", "updated_at"])
+    return True
+
+
+@transaction.atomic
 def _apply_trusted_description_backfill(
     app_id: int,
     planned_short_description: str,
@@ -714,6 +965,40 @@ def _trusted_source_long_description(
         detail_long = ((payload.get("detail") or {}).get("long_description") or "").strip()
         if detail_long:
             return detail_long
+    return ""
+
+
+def _trusted_source_values(app: App, source_types: tuple[str, ...]) -> list[str]:
+    return list(
+        app.sources.filter(source_type__in=source_types, is_active=True)
+        .order_by("source_type")
+        .values_list("source_type", flat=True)
+        .distinct()
+    )
+
+
+def _trusted_directory_urls(app: App) -> list[str]:
+    return [
+        url
+        for url in app.platform_links.order_by("pk").values_list(
+            "official_directory_url", flat=True
+        )
+        if url
+    ]
+
+
+def _has_trusted_directory(source_types: list[str], directory_urls: list[str]) -> bool:
+    return any(
+        is_trusted_official_directory_url(source_type, url)
+        for source_type in source_types
+        for url in directory_urls
+    )
+
+
+def _launch_status_from_source_text(source_text: str) -> str:
+    normalized = " ".join((source_text or "").lower().split())
+    if re.search(r"\bin beta\b", normalized):
+        return App.LaunchStatus.BETA
     return ""
 
 
