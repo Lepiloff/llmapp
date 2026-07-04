@@ -709,3 +709,116 @@ Remaining Claude blockers after this run:
 - `adobe-journey-optimizer`: MCP taxonomy + short description/capability +
   launch-status review change
 - `amplitude`: MCP source/platform + short description
+
+## Stage 5 follow-up — trusted connector MCP taxonomy repair
+
+Production run on commit `b22187c`:
+
+- Deployed trusted connector taxonomy/status repairs:
+  - new dry-run/apply command `repair_trusted_connector_mcp_taxonomy`;
+  - new dry-run/apply command `backfill_trusted_connector_launch_statuses`;
+  - both commands exclude real MCP Registry source/platform rows by default.
+- Runtime checks:
+  - `python manage.py check`: ok;
+  - `/health/`: ok after Gunicorn finished booting;
+  - new management commands available inside the `web` container.
+
+Claude-only MCP taxonomy repair dry-run:
+
+- `evaluated=1`;
+- `would_update=1`;
+- candidate:
+  - `adobe-journey-optimizer -> remove mcp-server`.
+
+Applied MCP taxonomy repair:
+
+```bash
+python manage.py repair_trusted_connector_mcp_taxonomy \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=1`;
+- `updated_listing_types=1`;
+- updated app: `adobe-journey-optimizer`.
+
+Claude-only launch status backfill dry-run:
+
+- `evaluated=24`;
+- `would_update=1`;
+- candidate:
+  - `adobe-journey-optimizer -> beta`.
+
+Applied launch status backfill:
+
+```bash
+python manage.py backfill_trusted_connector_launch_statuses \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=1`;
+- updated app: `adobe-journey-optimizer`;
+- new `launch_status=beta`.
+
+Follow-up Claude autopublish dry-run:
+
+- `adobe-journey-optimizer` still had blocker `explicit_capabilities_lt_2`.
+- `amplitude` remained blocked by MCP source/platform and short description.
+
+Claude-only capability backfill dry-run:
+
+- `evaluated=24`;
+- `would_update=1`;
+- candidate:
+  - `adobe-journey-optimizer -> remote_available=yes, local_setup_required=no`.
+
+Applied capability backfill:
+
+```bash
+python manage.py backfill_trusted_connector_capabilities \
+  --source-type claude_connectors --limit 100 --apply
+```
+
+Result:
+
+- `updated=1`;
+- `updated_capabilities=2`;
+- updated app: `adobe-journey-optimizer`.
+
+Follow-up Claude autopublish dry-run:
+
+- `evaluated=2`;
+- `would_publish=1`;
+- candidate: `adobe-journey-optimizer`.
+
+Applied autopublish:
+
+```bash
+python manage.py autopublish_candidates \
+  --source-type claude_connectors --limit 50 --apply
+```
+
+Result:
+
+- `published=1`;
+- newly published app: `adobe-journey-optimizer`;
+- `App.status` counts after run: `draft=15893`, `hidden=1`, `published=24`;
+- Claude published count: `24`;
+- `LLMCallLog`: unchanged at `1287`.
+
+Validation:
+
+- Public page `https://llmappmarket.com/apps/adobe-journey-optimizer/`
+  returned HTTP 200.
+- Public API `GET /api/v1/apps/?platform=claude&page_size=80` returned
+  `count=24` and includes `adobe-journey-optimizer`.
+- Public API shows `adobe-journey-optimizer` with `launch_status=beta`.
+- Public sitemap includes:
+  - `https://llmappmarket.com/apps/adobe-journey-optimizer/`.
+
+Remaining Claude blockers after this run:
+
+- `amplitude`: MCP source/platform + short description
